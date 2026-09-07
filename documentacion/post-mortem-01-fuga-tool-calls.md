@@ -3,8 +3,8 @@
 - **Fecha del incidente**: 2026-09-07
 - **Detectado por**: usuario durante QA manual de PR-09 (subida de PDFs).
 - **Severidad**: alta — el alumno ve tripas del sistema y el turno termina sin respuesta útil.
-- **Estado**: causa confirmada · resuelto (PR-12 + PR-12.1)
-- **PR**: PR-12 (`fix/fuga-tool-calls`) + PR-12.1 (`fix/fuga-tool-calls-reintento`)
+- **Estado**: causa eliminada · resuelto (PR-12 + PR-12.1 + PR-12.2)
+- **PR**: PR-12 (`fix/fuga-tool-calls`) + PR-12.1 (`fix/fuga-tool-calls-reintento`) + PR-12.2 (`fix/tool-calls-estructural`)
 
 ---
 
@@ -183,15 +183,21 @@ tool calls y los primeros 200 caracteres del texto de respuesta.
 
 ---
 
-## 8. Lo que no se arregló
+## 8. Resolución completa (PR-12.2)
 
-- **`renderMessage` sigue serializando como prosa.** La solución de la Fase 3 (Opción A)
-  es un parche de reconocimiento por regex. La solución completa requiere llevar la
-  información estructurada de tool call hasta `gemini.ts` sin regex, lo que exige cambiar
-  `AgentMessage` (declarado dos veces), `renderMessage`, el contrato NDJSON y el cliente
-  web. Encaja con el PR-05.
-- **Experimento A (`maxSteps: 16`) y Experimento B (historial limpio)** no se ejecutaron
-  aún. Pendiente de QA manual con entorno configurado.
+`renderMessage` ya no serializa tool calls a texto. Las tool calls viajan como partes
+estructuradas `{ type: "tool-call", id, name, params }` (rol `assistant`) y los resultados
+como `{ type: "tool-result", id, name, isFailure, result }` (rol `tool`). `gemini.ts`
+traduce esas partes directamente a `functionCall` / `functionResponse` — sin regex, sin
+sincronización manual.
+
+`TOOL_CALL_RE`, `TOOL_RESULT_RE` y `buildLeakPattern` eliminados. La detección de
+MALFORMED_FUNCTION_CALL se apoya solo en `finishReason`, que lo da la API.
+
+El reintento usa `toolConfig: { functionCallingConfig: { mode: "ANY" } }` para forzar
+una llamada real sin mandar texto correctivo. Si el segundo intento también falla, el
+adaptador devuelve `[]` y `session.ts` continúa el bucle con un mensaje sintético de
+usuario, invisible al alumno, para que el modelo responda con lo que ya sabe.
 
 ---
 
@@ -199,15 +205,17 @@ tool calls y los primeros 200 caracteres del texto de respuesta.
 
 | Medida | Dónde vive | Cómo se comprueba que sigue puesta |
 |---|---|---|
+| Log `gemini.request` antes de cada llamada | `gemini.ts` | `grep "gemini.request" log` muestra `functionCall:cli` — nunca `text:Tool call` |
 | Log `gemini.response` por llamada | `gemini.ts` | `grep "gemini.response" /tmp/fuga-*.log` devuelve ≥ 3 líneas |
 | Log `agent.step` por paso | `session.ts` | `grep "agent.step" /tmp/fuga-*.log` devuelve ≥ 3 líneas |
-| Detección de fuga en `toResponseParts` | `gemini.ts` | `grep "agent.tool_call_leak" ...` = 0 tras el arreglo |
-| Reglas de formato en system prompt | `academic-tutor.ts` | El string `"Tool call format"` está en el prompt |
-| Timeout 30 s en tool handlers | `harness.ts` | Sin cambio: `grep "TOOL_TIMEOUT" harness.ts` |
+| `renderPrompt` emite partes estructuradas | `session.ts` | `grep "Tool call " session.ts` = 0 |
+| Sin regex de sincronización | `gemini.ts` | `grep "TOOL_CALL_RE\|buildLeakPattern" gemini.ts` = 0 |
+| Detección solo en `finishReason` | `gemini.ts` | `grep "MALFORMED_FUNCTION_CALL" gemini.ts` — 1 línea en `toResponseParts` |
+| Reintento con `mode: "ANY"`, acotado a 1 | `gemini.ts` | `grep "mode.*ANY" gemini.ts` — en bloque de retry |
+| Bail devuelve `[]`, bucle continúa | `gemini.ts` + `session.ts` | `grep "No he podido completar" packages/server/src` = 0 |
+| Timeout 30 s en tool handlers | `harness.ts` | `grep "TOOL_TIMEOUT" harness.ts` |
 | Timeout 20 s + exit code en `renderPage` | `poppler-pdf-service.ts` | `grep "exitCode !== 0" poppler-pdf-service.ts` |
-| Reintento acotado a 1 en `MALFORMED_FUNCTION_CALL` | `gemini.ts` | `grep "agent.tool_call_retry" log` muestra `recovered` o `bailed` |
-| Patrón leak validado contra 5 cadenas | `gemini.ts:buildLeakPattern` | Node one-liner en PR-12.1 §Paso 2.3 |
-| No hay sintaxis de tool call en skills/harness | skills + `harness.ts` | `grep -rn 'cli({\|load_skill({' ...` = 0 |
+| No hay sintaxis de tool call en skills/harness/prompt | skills + `harness.ts` + `academic-tutor.ts` | `grep -rn "default_api\|tool_code\|Tool call " packages/server/src` = 0 |
 
 ---
 
@@ -223,3 +231,5 @@ tool calls y los primeros 200 caracteres del texto de respuesta.
   perder información crítica de forma silenciosa.
 - **Una regex escrita a ojo en un plan e implementada tal cual sin probarse contra la cadena real.** El PR-12 §Paso 6 definía el patrón sin ejecutarlo. El PR-12.1 incluye una verificación explícita (Paso 2.3) contra 5 cadenas de prueba antes de commitear. Los patrones de detección se validan con datos reales.
 - **Tres sitios distintos enseñaban al modelo a escribir tool calls en prosa**: el historial (renderMessage), las skills (paso 1 de use-uploaded-materials) y el prompt del harness (el ejemplo `{ "name": "..." }`). Eliminar solo el historial no fue suficiente.
+- **El coste del arreglo estructural era una suposición que nadie verificó.** Durante dos iteraciones se aplazó el cambio a partes nativas por suponer que exigía tocar `AgentMessage`, `packages/shared` y el contrato NDJSON. Al verificar `effect@4.0.0-beta.83`, resultó que `Prompt.ToolCallPartEncoded` y `Prompt.ToolResultPartEncoded` ya existían y el cambio era local a `packages/server`. La suposición costó dos iteraciones y dos PRs. Verificar antes de aplazar.
+- **Las instrucciones negativas que nombran el token prohibido lo hacen más probable.** El reintento del PR-12.1 añadía "Do not write the words `Tool call`" — el log muestra que ese reintento tardó 18 s y salió `MALFORMED_FUNCTION_CALL`. El intento original (sin esa frase) había llegado a `STOP`. Nombrarlo en contexto justo antes de generar lo activa.
