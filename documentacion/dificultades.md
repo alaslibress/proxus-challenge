@@ -130,6 +130,32 @@ Registro de obstáculos encontrados durante la implementación, con síntoma, ca
 
 ---
 
+## PR-12.2 — Eliminar la causa: partes estructuradas en el contrato
+
+### El arreglo estructural se aplazó dos veces por un coste que nunca se verificó
+
+**Síntoma**: el PR-12 y el PR-12.1 aplazaron el cambio a partes nativas de tool call asumiendo que exigía tocar `AgentMessage`, `packages/shared` y el contrato NDJSON.
+
+**Causa**: la suposición era falsa. `Prompt.ToolCallPartEncoded` (`Prompt.ts:543`), `Prompt.ToolResultPartEncoded` (`:660`) y el rol `"tool"` (`:1584`) ya existen en `effect@4.0.0-beta.83`. El cambio es local a `packages/server`.
+
+**Solución**: `renderPrompt` emite partes estructuradas directamente; `promptContents` las consume sin regex. Eliminados `TOOL_CALL_RE`, `TOOL_RESULT_RE` y `buildLeakPattern`. Verificado con `pnpm run typecheck` sin tocar `packages/shared` ni `packages/web`.
+
+**Descartado**: aplazar de nuevo a PR-05 (ya no hay razón para ello).
+
+---
+
+### Caso multimodal necesita dos mensajes, no uno
+
+**Síntoma**: `ToolMessageEncoded` solo admite partes `tool-result` y `tool-approval-response` — no partes `file`. El caso de MaterialPageImages emitía un mensaje de usuario con imágenes, que no cabe en ese rol.
+
+**Causa**: la API de Gemini recibe imágenes en mensajes de usuario, no en mensajes de función.
+
+**Solución**: cuando el resultado es `MaterialPageImages`, se emiten dos mensajes: (1) mensaje `tool` con resultado textual corto y (2) mensaje `user` con las imágenes. El id de la tool call es compartido por ambos. La QA manual del caso "resume la página 1" verifica que las imágenes siguen llegando.
+
+**Descartado**: emitir solo el mensaje de usuario con imágenes (pierde la correlación tool-call/tool-result en el historial de Effect).
+
+---
+
 ### La corrección del PR-12 llegaba al alumno en vez de al modelo
 
 **Síntoma**: cuando se detectaba la fuga, `toResponseParts` devolvía un texto de corrección como parte del response. Ese texto se emitía como respuesta del asistente al alumno. El modelo nunca lo veía.
