@@ -203,6 +203,12 @@ Tres límites que condicionan cualquier diseño:
 925 líneas en total, sin router y sin tests. Layout de una sola rejilla en `App.tsx`,
 cuya tercera columna de 420px se la lleva el chat.
 
+**Sistema visual** (PR-1.5, `feat/sistema-visual`): la UI tiene un sistema de tokens centralizado en
+`packages/web/src/styles.input.css` (bloque `@theme` de Tailwind v4). El tema es **claro**
+(fondo `#FBFAFE`, texto `#14102A`). Fuentes: Geist y Geist Mono desde Google Fonts.
+El sidebar mide 252 px. Ningún componente usa clases de color literal de Tailwind;
+todo el color viene de tokens del design system. Ver `documentacion/design-system.md`.
+
 **El estado del chat no está en atoms**: son cuatro `useState` dentro de
 `Chat.tsx:18-24`. `domain/tutor/atoms.ts` contiene un único action que apunta al
 endpoint **no** streaming y **no tiene ni un call site**: código muerto.
