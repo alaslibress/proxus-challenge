@@ -113,3 +113,29 @@ Registro de obstáculos encontrados durante la implementación, con síntoma, ca
 **Solución**: `return yield* new PdfServiceError({ reason: ... })`.
 
 **Descartado**: `throw new PdfServiceError(...)` (no es una operación de Effect y rompe el tipo de retorno).
+
+---
+
+## PR-12.1 — La fuga sigue: señal fiable y reintento acotado
+
+### El patrón de detección del PR-12 no casaba con la cadena real
+
+**Síntoma**: el log del 7-sep 22:29 mostró `textPreview: 'Tool call load_skill: ...'` pasando sin ser detectado por `buildLeakPattern`. El bug seguía vivo.
+
+**Causa**: el patrón `\bload_skill\b\s*[({]` exige `(` o `{` inmediatamente tras el nombre. En el texto real hay `: ` entre el nombre y los argumentos. Error de diseño en el plan PR-12, implementado sin verificación.
+
+**Solución**: patrón de dos formas (a) nuestro formato de historial `Tool call <name>:` y (b) forma narrada `default_api:load_skill{`. Validado contra 5 cadenas de prueba con un node one-liner antes de commitear.
+
+**Descartado**: añadir más alternativas sin probarlas primero.
+
+---
+
+### La corrección del PR-12 llegaba al alumno en vez de al modelo
+
+**Síntoma**: cuando se detectaba la fuga, `toResponseParts` devolvía un texto de corrección como parte del response. Ese texto se emitía como respuesta del asistente al alumno. El modelo nunca lo veía.
+
+**Causa**: la corrección estaba en `responseParts`, que `session.ts` emite directamente cuando no hay tool results. El diseño del PR-12 asumía que ese texto volvería al modelo en el siguiente turno, pero el turno ya terminaba.
+
+**Solución**: PR-12.1 extrae la lógica en `callGeminiOnce` y hace UN reintento interno dentro del adaptador cuando detecta un paso malformado. El mensaje correctivo va como turno extra en `contents` (invisible al historial del chat). Si el reintento recupera → devuelve la respuesta correcta. Si no → frase legible para el usuario.
+
+**Descartado**: hacer el reintento desde `session.ts` (consumiría un paso de `maxSteps` y sería visible en el historial).

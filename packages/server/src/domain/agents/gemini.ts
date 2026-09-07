@@ -38,6 +38,7 @@ const GeminiResponse = Schema.Struct({
 });
 
 type GeminiPart = typeof GeminiPart.Type;
+type GeminiResponseType = typeof GeminiResponse.Type;
 
 class GeminiConfigError extends Data.TaggedError("GeminiConfigError")<{
   readonly reason: string;
@@ -123,10 +124,11 @@ const promptSystemInstruction = (prompt: LanguageModel.ProviderOptions["prompt"]
     : { parts: [{ text }] };
 };
 
-// Recognises prose-encoded tool messages that `renderMessage` emits in the harness.
-// Opción A (PR-12): translate back to native Gemini parts so the model sees its own
-// function call/response format, not prose. The two patterns must stay in sync with
-// the `renderMessage` switch in harness/session.ts.
+// Three patterns that describe the same format and MUST stay in sync with each other:
+//   1. renderMessage  (harness/session.ts)  — produces "Tool call <name>: <json>"
+//   2. TOOL_CALL_RE  (below)                — translates history back to native functionCall
+//   3. buildLeakPattern (below)             — detects if the model reproduced the format
+// If renderMessage changes, update all three.
 const TOOL_CALL_RE = /^Tool call (\w+): (\{[\s\S]*\}|\[[\s\S]*\])$/;
 const TOOL_RESULT_RE = /^Tool result (\w+)( failure)?: ([\s\S]*)$/;
 
@@ -134,7 +136,8 @@ const promptContents = (prompt: LanguageModel.ProviderOptions["prompt"]): readon
   prompt.content
     .filter((message) => message.role !== "system")
     .map((message): GeminiTextContent => {
-      // Translate prose tool-call → native functionCall part (model role)
+      // Translate prose tool-call → native functionCall part (model role).
+      // Opción A (PR-12/12.1): regex parche hasta que PR-05 migre el contrato de frames.
       if (message.role === "assistant" && typeof message.content === "string") {
         const m = TOOL_CALL_RE.exec(message.content);
         if (m !== null) {
@@ -265,74 +268,149 @@ const firstFunctionCall = (parts: ReadonlyArray<GeminiPart>) =>
 const decodeGeminiResponse = (json: unknown) =>
   Schema.decodeUnknownSync(GeminiResponse)(json);
 
+// Detects when the model wrote a tool call as prose instead of emitting a real functionCall.
+// Primary signal: finishReason === "MALFORMED_FUNCTION_CALL" (deterministic, from API).
+// Secondary signal: text matching our own history format or the "default_api:" narration.
+// Pattern a) our history format: "Tool call <name>: {...}" — see renderMessage / TOOL_CALL_RE
+// Pattern b) narrated call: "default_api.load_skill({...})" / "cli({...})"
+// Must stay in sync with renderMessage (harness/session.ts) and TOOL_CALL_RE (above).
 const buildLeakPattern = (tools: LanguageModel.ProviderOptions["tools"]): RegExp | null => {
   if (tools.length === 0) return null;
   const escaped = tools.map((t) => t.name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("|");
-  return new RegExp(`(?:default_api[.:]\\s*)?\\b(${escaped})\\b\\s*[({]`, "i");
+  return new RegExp(
+    `(?:^|\\n)\\s*Tool call\\s+(?:${escaped})\\s*:` +
+    `|(?:default_api[.:]\\s*)?\\b(?:${escaped})\\b\\s*[:(\\{]`,
+    "i"
+  );
 };
+
+interface ToResponsePartsResult {
+  readonly responseParts: Array<Response.PartEncoded>;
+  // Non-null signals a leak or MALFORMED_FUNCTION_CALL. The caller handles retry.
+  // responseParts is empty when leakText is non-null.
+  readonly leakText: string | null;
+}
 
 const toResponseParts = (
   parts: ReadonlyArray<GeminiPart>,
+  finishReason: string,
   tools: LanguageModel.ProviderOptions["tools"]
-): { readonly responseParts: Array<Response.PartEncoded>; readonly leakText: string | null } => {
+): ToResponsePartsResult => {
   const functionCall = firstFunctionCall(parts);
 
-  if (functionCall?.name === undefined) {
-    const textParts = parts.flatMap((part) => part.text !== undefined && !part.thought ? [part.text] : []);
-    const fullText = textParts.join("");
-    const leakPattern = buildLeakPattern(tools);
+  if (functionCall?.name !== undefined) {
+    // Valid function call part — process regardless of finishReason
+    const toolNames = new Set(tools.map((tool) => tool.name));
 
-    if (leakPattern !== null && leakPattern.test(fullText)) {
-      return {
-        responseParts: [
-          Response.makePart("text", {
-            text: "Your previous turn wrote a tool call as plain text instead of emitting it. Emit it as a real function call, or answer the user directly."
-          }) as unknown as Response.PartEncoded
-        ],
-        leakText: fullText
-      };
+    const toolCall = toolNames.has(functionCall.name)
+      ? {
+          name: functionCall.name,
+          params: functionCall.args ?? {}
+        }
+      : toolNames.has("load_skill")
+        ? {
+            name: "load_skill",
+            params: { name: functionCall.name }
+          }
+        : {
+            name: functionCall.name,
+            params: functionCall.args ?? {}
+          };
+
+    if (!toolNames.has(toolCall.name)) {
+      const availableTools = tools.map((tool) => tool.name).join(", ");
+      throw new Error(`Invalid tool call "${functionCall.name}". Available tools: ${availableTools}.`);
     }
 
     return {
-      responseParts: textParts.map((text) => Response.makePart("text", { text }) as unknown as Response.PartEncoded),
+      responseParts: [
+        Response.makePart("tool-call", {
+          id: `call_${crypto.randomUUID()}`,
+          name: toolCall.name,
+          params: toolCall.params,
+          providerExecuted: false
+        }) as unknown as Response.PartEncoded
+      ],
       leakText: null
     };
   }
 
-  const toolNames = new Set(tools.map((tool) => tool.name));
+  // No functionCall part — check primary signal then secondary
+  const textParts = parts.flatMap((part) => part.text !== undefined && !part.thought ? [part.text] : []);
+  const fullText = textParts.join("");
 
-  const toolCall = toolNames.has(functionCall.name)
-    ? {
-        name: functionCall.name,
-        params: functionCall.args ?? {}
-      }
-    : toolNames.has("load_skill")
-      ? {
-          name: "load_skill",
-          params: { name: functionCall.name }
-        }
-      : {
-          name: functionCall.name,
-          params: functionCall.args ?? {}
-        };
+  const isMalformed = finishReason === "MALFORMED_FUNCTION_CALL";
+  const leakPattern = buildLeakPattern(tools);
+  const hasLeakText = leakPattern !== null && leakPattern.test(fullText);
 
-  if (!toolNames.has(toolCall.name)) {
-    const availableTools = tools.map((tool) => tool.name).join(", ");
-    throw new Error(`Invalid tool call "${functionCall.name}". Available tools: ${availableTools}.`);
+  if (isMalformed || hasLeakText) {
+    return {
+      responseParts: [],
+      leakText: fullText.length > 0 ? fullText : "MALFORMED_FUNCTION_CALL"
+    };
   }
 
   return {
-    responseParts: [
-      Response.makePart("tool-call", {
-        id: `call_${crypto.randomUUID()}`,
-        name: toolCall.name,
-        params: toolCall.params,
-        providerExecuted: false
-      }) as unknown as Response.PartEncoded
-    ],
+    responseParts: textParts.map((text) => Response.makePart("text", { text }) as unknown as Response.PartEncoded),
     leakText: null
   };
 };
+
+interface GeminiCallResult {
+  readonly parts: ReadonlyArray<GeminiPart>;
+  readonly finishReason: string;
+  readonly usageMetadata: GeminiResponseType["usageMetadata"];
+  readonly promptFeedback: GeminiResponseType["promptFeedback"];
+}
+
+const callGeminiOnce = (url: string, body: unknown): Effect.Effect<GeminiCallResult, AiError.AiError> =>
+  Effect.gen(function* () {
+    const rawJson = yield* Effect.tryPromise({
+      try: async (signal) => {
+        const response = await fetch(url, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify(body),
+          signal
+        });
+
+        if (!response.ok) {
+          throw new Error(await response.text());
+        }
+
+        return response.json();
+      },
+      catch: (cause) => toAiError(cause instanceof Error ? cause.message : String(cause))
+    });
+
+    const json = yield* Effect.try({
+      try: () => decodeGeminiResponse(rawJson),
+      catch: (cause) => toAiError(cause instanceof Error ? cause.message : String(cause))
+    });
+
+    const candidate = json.candidates?.[0];
+
+    return {
+      parts: candidate?.content?.parts ?? [],
+      finishReason: candidate?.finishReason ?? "unknown",
+      usageMetadata: json.usageMetadata,
+      promptFeedback: json.promptFeedback
+    };
+  });
+
+const logGeminiResponse = (call: GeminiCallResult, extra?: Record<string, unknown>) =>
+  Effect.log("gemini.response").pipe(
+    Effect.annotateLogs({
+      finishReason: call.finishReason,
+      totalTokens: call.usageMetadata?.totalTokenCount,
+      partCount: call.parts.length,
+      functionCallParts: call.parts.filter((p) => p.functionCall?.name !== undefined).length,
+      thoughtParts: call.parts.filter((p) => p.thought === true).length,
+      blockReason: call.promptFeedback?.blockReason,
+      textPreview: call.parts.flatMap((p) => p.text !== undefined && !p.thought ? [p.text] : []).join("").slice(0, 200),
+      ...extra
+    })
+  );
 
 export const GeminiLanguageModelLive = Layer.effect(
   LanguageModel.LanguageModel,
@@ -342,57 +420,62 @@ export const GeminiLanguageModelLive = Layer.effect(
     return yield* LanguageModel.make({
       generateText: (options) =>
         Effect.gen(function* () {
-          const rawJson = yield* Effect.tryPromise({
-            try: async (signal) => {
-              const response = await fetch(geminiUrl(config.model, config.apiKey), {
-                method: "POST",
-                headers: { "content-type": "application/json" },
-                body: JSON.stringify(requestBody(options)),
-                signal
-              });
+          const url = geminiUrl(config.model, config.apiKey);
+          const body = requestBody(options);
 
-              if (!response.ok) {
-                throw new Error(await response.text());
-              }
+          // First call
+          const call1 = yield* callGeminiOnce(url, body);
+          yield* logGeminiResponse(call1);
 
-              return response.json();
-            },
+          const result1 = yield* Effect.try({
+            try: () => toResponseParts(call1.parts, call1.finishReason, options.tools),
             catch: (cause) => toAiError(cause instanceof Error ? cause.message : String(cause))
           });
 
-          const json = yield* Effect.try({
-            try: () => decodeGeminiResponse(rawJson),
-            catch: (cause) => toAiError(cause instanceof Error ? cause.message : String(cause))
-          });
-
-          const candidate = json.candidates?.[0];
-          const parts = candidate?.content?.parts ?? [];
-          const finishReason = candidate?.finishReason ?? "unknown";
-
-          yield* Effect.log("gemini.response").pipe(
-            Effect.annotateLogs({
-              finishReason,
-              totalTokens: json.usageMetadata?.totalTokenCount,
-              partCount: parts.length,
-              functionCallParts: parts.filter((p) => p.functionCall?.name !== undefined).length,
-              thoughtParts: parts.filter((p) => p.thought === true).length,
-              blockReason: json.promptFeedback?.blockReason,
-              textPreview: parts.flatMap((p) => p.text !== undefined && !p.thought ? [p.text] : []).join("").slice(0, 200)
-            })
-          );
-
-          const result = yield* Effect.try({
-            try: () => toResponseParts(parts, options.tools),
-            catch: (cause) => toAiError(cause instanceof Error ? cause.message : String(cause))
-          });
-
-          if (result.leakText !== null) {
-            yield* Effect.log("agent.tool_call_leak").pipe(
-              Effect.annotateLogs({ leakPreview: result.leakText.slice(0, 200) })
-            );
+          if (result1.leakText === null) {
+            return result1.responseParts;
           }
 
-          return result.responseParts;
+          // Leak or MALFORMED_FUNCTION_CALL detected — log and retry once
+          yield* Effect.log("agent.tool_call_leak").pipe(
+            Effect.annotateLogs({ leakPreview: result1.leakText.slice(0, 200) })
+          );
+
+          const retryBody = {
+            ...body,
+            contents: [
+              ...body.contents,
+              {
+                role: "user" as const,
+                parts: [{ text: "Your last reply wrote a function call as text. Emit it as a real function call, or answer in plain language. Do not write the words \"Tool call\"." }]
+              }
+            ]
+          };
+
+          const call2 = yield* callGeminiOnce(url, retryBody);
+          yield* logGeminiResponse(call2, { retry: true });
+
+          const result2 = yield* Effect.try({
+            try: () => toResponseParts(call2.parts, call2.finishReason, options.tools),
+            catch: (cause) => toAiError(cause instanceof Error ? cause.message : String(cause))
+          });
+
+          if (result2.leakText === null) {
+            yield* Effect.log("agent.tool_call_retry").pipe(
+              Effect.annotateLogs({ outcome: "recovered" })
+            );
+            return result2.responseParts;
+          }
+
+          yield* Effect.log("agent.tool_call_retry").pipe(
+            Effect.annotateLogs({ outcome: "bailed" })
+          );
+
+          return [
+            Response.makePart("text", {
+              text: "No he podido completar esa acción. Vuelve a pedírmelo con otras palabras, por favor."
+            }) as unknown as Response.PartEncoded
+          ];
         }),
       streamText: () => Stream.empty
     });

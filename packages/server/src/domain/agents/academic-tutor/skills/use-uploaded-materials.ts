@@ -18,8 +18,8 @@ export const UseUploadedMaterialsSkill = AgentSkill.make({
     "- a mixed selection: `10,13-20`",
     "",
     "Workflow:",
-    "1. If you do not know the material id, call `cli({ \"input\": \"materials list\" })`.",
-    "2. When the user asks about a PDF or page range, call `materials view` with the smallest useful page range.",
+    "1. If you do not know the material id, list the materials first.",
+    "2. When the user asks about a PDF or page range, render the smallest useful page range with `materials view`.",
     "3. Treat rendered pages as the source of truth.",
     "4. If the rendered pages do not contain enough evidence, say so clearly.",
     "5. When explaining, cite page numbers from the rendered result."

@@ -58,7 +58,7 @@ ${skillsHelp(spec.skills)}
 
 You initially only know skill names and short descriptions.
 Skills are not tools and their names are not callable functions.
-When a task matches a skill description, call the load_skill tool with the skill name, for example { "name": "use-uploaded-materials" }.
+When a task matches a skill description, load that skill by name before doing the work.
 Skill text may describe workflows, conventions, examples, or tools available elsewhere in the harness.`;
 
     const TOOL_TIMEOUT = "30 seconds";

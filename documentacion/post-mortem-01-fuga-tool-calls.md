@@ -3,8 +3,8 @@
 - **Fecha del incidente**: 2026-09-07
 - **Detectado por**: usuario durante QA manual de PR-09 (subida de PDFs).
 - **Severidad**: alta — el alumno ve tripas del sistema y el turno termina sin respuesta útil.
-- **Estado**: causa confirmada · resuelto (PR-12, `fix/fuga-tool-calls`)
-- **PR**: PR-12 (`fix/fuga-tool-calls`)
+- **Estado**: causa confirmada · resuelto (PR-12 + PR-12.1)
+- **PR**: PR-12 (`fix/fuga-tool-calls`) + PR-12.1 (`fix/fuga-tool-calls-reintento`)
 
 ---
 
@@ -52,8 +52,24 @@ entorno con API key y PDF. Los resultados de los experimentos se actualizarán t
 | 2 | no verificado | no verificado | no verificado | no verificado |
 | 3 | no verificado | no verificado | no verificado | no verificado |
 
-La causa raíz fue diagnosticada por análisis estático del código: la cadena causal es
-evidente en `renderMessage` y `promptContents` sin necesidad de logs.
+La causa raíz fue **confirmada** por el log de reproducción del 2026-09-07 22:29:
+
+```
+[22:29:04.648] INFO (#13): gemini.response {
+  finishReason: 'MALFORMED_FUNCTION_CALL',
+  totalTokens: 787,
+  partCount: 2,
+  functionCallParts: 0,
+  thoughtParts: 0,
+  textPreview: 'Tool call load_skill: {"name":"create-study-artifacts"}'
+}
+```
+
+El `finishReason: 'MALFORMED_FUNCTION_CALL'` confirma que la API intentó serializar una
+function call, no pudo, y devolvió el intento como texto — exactamente el formato que
+produce `renderMessage` (`session.ts`). El modelo copió lo que vio en el historial.
+
+El PR-12 añadió los logs pero no cerró el bug por dos razones (ver §7).
 
 ---
 
@@ -64,7 +80,7 @@ evidente en `renderMessage` y `promptContents` sin necesidad de logs.
 | Estrangulamiento por `maxSteps` | **Descartada** | El path de agotamiento (`session.ts:115-119`) produce un texto distinto; el bug ocurrió en el paso 3 con 5 de margen |
 | Cierre prematuro del stream NDJSON | **Descartada** | El frame llegó completo y bien formado — `decodeUnknownSync` habría lanzado ante un frame truncado |
 | Fallo silencioso de una tool previa | **Descartada** | El reporte confirma que `load_skill` y `cli materials list` devolvieron resultados; `cli` tiene `failureMode: "return"` |
-| Envenenamiento del historial por `renderMessage` | **Confirmada** (análisis estático) | Ver §6 |
+| Envenenamiento del historial por `renderMessage` | **Confirmada** (log 2026-09-07 22:29 + `MALFORMED_FUNCTION_CALL`) | Ver §6 |
 
 ---
 
@@ -95,7 +111,9 @@ en la respuesta, `toResponseParts` devuelve ese texto como respuesta del asisten
 
 ## 7. Solución implementada
 
-### Arregla la causa raíz
+### PR-12 — Lo que arregló y lo que no cerró
+
+**Arregla la causa raíz (parcialmente)**:
 
 **`gemini.ts`, función `promptContents`** — reconoce los mensajes de historial que
 `renderMessage` serializa como prosa y los traduce de vuelta a partes nativas de Gemini:
@@ -109,7 +127,31 @@ Así el modelo ve su propio formato nativo en el historial, no prosa imitada.
 sincronía con `renderMessage` en `harness/session.ts`. Se eliminarán cuando el PR-05
 migre el contrato de frames.
 
-### Contiene el síntoma (red de seguridad)
+**Fallo del PR-12 — dos bugs que impedían el cierre**:
+
+1. El patrón de detección `buildLeakPattern` usaba `\bload_skill\b\s*[({]` — exigía `(` o `{` inmediatamente después del nombre. El texto real tiene `: ` entre el nombre y los args (`Tool call load_skill: {...}`), así que no casaba.
+2. La corrección se emitía como texto en `responseParts` y llegaba al alumno en vez de llegar al modelo. El turno se cerraba sin retry porque no había tool results.
+
+### PR-12.1 — Cierre definitivo
+
+**Señal primaria: `MALFORMED_FUNCTION_CALL`** — dato determinista de la API que no requiere regex.
+
+**Patrón corregido** — dos formas, ambas validadas contra 5 cadenas de prueba antes de commitear:
+
+```
+a) Tool call load_skill: {...}   → patrón a: (?:^|\n)\s*Tool call\s+(?:names)\s*:
+b) default_api:load_skill{...}  → patrón b: (?:default_api[.:])?\\b(?:names)\\b\\s*[:(\\{]
+```
+
+**Reintento interno en el adaptador** — cuando se detecta un paso malformado:
+1. Se hace UNA petición de reintento con el mismo body + turno correctivo al final de `contents`.
+2. El mensaje correctivo llega al modelo, no al alumno.
+3. Si el reintento se recupera: log `agent.tool_call_retry {outcome: "recovered"}`.
+4. Si también falla: log `{outcome: "bailed"}` + frase legible para el usuario. Nunca el texto fugado.
+
+**Skills y harness saneados** — se eliminó toda la sintaxis de llamada en prosa de las skills y del prompt del harness (era el tercer vector de few-shot training).
+
+### Contiene el síntoma (red de seguridad, ambos PRs)
 
 **`gemini.ts`, función `toResponseParts`** — detecta si el modelo escribe una tool call
 como texto aunque no haya `functionCall` nativa:
@@ -163,6 +205,9 @@ tool calls y los primeros 200 caracteres del texto de respuesta.
 | Reglas de formato en system prompt | `academic-tutor.ts` | El string `"Tool call format"` está en el prompt |
 | Timeout 30 s en tool handlers | `harness.ts` | Sin cambio: `grep "TOOL_TIMEOUT" harness.ts` |
 | Timeout 20 s + exit code en `renderPage` | `poppler-pdf-service.ts` | `grep "exitCode !== 0" poppler-pdf-service.ts` |
+| Reintento acotado a 1 en `MALFORMED_FUNCTION_CALL` | `gemini.ts` | `grep "agent.tool_call_retry" log` muestra `recovered` o `bailed` |
+| Patrón leak validado contra 5 cadenas | `gemini.ts:buildLeakPattern` | Node one-liner en PR-12.1 §Paso 2.3 |
+| No hay sintaxis de tool call en skills/harness | skills + `harness.ts` | `grep -rn 'cli({\|load_skill({' ...` = 0 |
 
 ---
 
@@ -176,3 +221,5 @@ tool calls y los primeros 200 caracteres del texto de respuesta.
 - **Sin `finishReason`** en el schema, incluso un `MAX_TOKENS` o `SAFETY` habría pasado
   desapercibido. Decodificar solo los campos que uno cree necesitar es una forma de
   perder información crítica de forma silenciosa.
+- **Una regex escrita a ojo en un plan e implementada tal cual sin probarse contra la cadena real.** El PR-12 §Paso 6 definía el patrón sin ejecutarlo. El PR-12.1 incluye una verificación explícita (Paso 2.3) contra 5 cadenas de prueba antes de commitear. Los patrones de detección se validan con datos reales.
+- **Tres sitios distintos enseñaban al modelo a escribir tool calls en prosa**: el historial (renderMessage), las skills (paso 1 de use-uploaded-materials) y el prompt del harness (el ejemplo `{ "name": "..." }`). Eliminar solo el historial no fue suficiente.
