@@ -103,7 +103,7 @@ function execute(
       );
 
       for (const toolCall of response.toolCalls) {
-        yield* appendMessage(AgentMessage.toolCall(toolCall.name, toolCall.params));
+        yield* appendMessage(AgentMessage.toolCall(toolCall.name, toolCall.params, toolCall.id));
       }
 
       for (const toolResult of response.toolResults) {
@@ -180,7 +180,8 @@ const renderPrompt = (
         result.push({ role: "assistant", content: message.content });
         break;
       case "tool-call": {
-        const id = `call_${callIndex++}`;
+        const id = message.id ?? `call_${callIndex}`;
+        callIndex++;
         result.push({
           role: "assistant",
           content: [{ type: "tool-call", id, name: message.name, params: message.input as Record<string, unknown> }]

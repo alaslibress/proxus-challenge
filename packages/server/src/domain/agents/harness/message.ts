@@ -18,6 +18,7 @@ export interface ToolCallMessage {
   readonly role: "tool-call";
   readonly name: string;
   readonly input: unknown;
+  readonly id?: string;
 }
 
 export interface ToolResultMessage {
@@ -36,10 +37,11 @@ export const AgentMessage = {
     role: "assistant",
     content
   }),
-  toolCall: (name: string, input: unknown): ToolCallMessage => ({
+  toolCall: (name: string, input: unknown, id?: string): ToolCallMessage => ({
     role: "tool-call",
     name,
-    input
+    input,
+    ...(id !== undefined ? { id } : {})
   }),
   toolResult: (name: string, result: unknown, isFailure: boolean): ToolResultMessage => ({
     role: "tool-result",

@@ -16,7 +16,8 @@ const FunctionCall = Schema.Struct({
 const GeminiPart = Schema.Struct({
   text: Schema.optional(Schema.String),
   thought: Schema.optional(Schema.Boolean),
-  functionCall: Schema.optional(FunctionCall)
+  functionCall: Schema.optional(FunctionCall),
+  thoughtSignature: Schema.optional(Schema.String)
 });
 
 const GeminiResponse = Schema.Struct({
@@ -72,7 +73,7 @@ const toAiError = (description: string) =>
 type GeminiContentPart =
   | { readonly text: string }
   | { readonly inlineData: { readonly mimeType: string; readonly data: string } }
-  | { readonly functionCall: { readonly name: string; readonly args: Record<string, unknown> } }
+  | { readonly functionCall: { readonly name: string; readonly args: Record<string, unknown> }; readonly thoughtSignature?: string }
   | { readonly functionResponse: { readonly name: string; readonly response: { readonly result: unknown; readonly isFailure?: boolean } } };
 
 interface GeminiTextContent {
@@ -101,8 +102,12 @@ const messageParts = (message: LanguageModel.ProviderOptions["prompt"]["content"
     }
 
     if (part.type === "tool-call") {
-      const p = part as unknown as { name: string; params: Record<string, unknown> };
-      return [{ functionCall: { name: p.name, args: p.params ?? {} } }];
+      const p = part as unknown as { name: string; params: Record<string, unknown>; id: string };
+      // Recover thoughtSignature encoded into the id by toResponseParts (format: "call_<uuid>||<sig>").
+      const separatorIdx = p.id.indexOf("||");
+      const thoughtSignature = separatorIdx !== -1 ? p.id.slice(separatorIdx + 2) : undefined;
+      const fcPart: GeminiContentPart = { functionCall: { name: p.name, args: p.params ?? {} }, ...(thoughtSignature ? { thoughtSignature } : {}) };
+      return [fcPart];
     }
 
     if (part.type === "tool-result") {
@@ -276,10 +281,17 @@ const toResponseParts = (
       throw new Error(`Invalid tool call "${functionCall.name}". Available tools: ${availableTools}.`);
     }
 
+    // thoughtSignature is encoded into the id so Effect transports it opaquely through its
+    // prompt and we can recover it when building history (see messageParts, "tool-call" case).
+    const thoughtSignature = parts.find((p) => p.functionCall?.name !== undefined)?.thoughtSignature;
+    const id = thoughtSignature
+      ? `call_${crypto.randomUUID()}||${thoughtSignature}`
+      : `call_${crypto.randomUUID()}`;
+
     return {
       responseParts: [
         Response.makePart("tool-call", {
-          id: `call_${crypto.randomUUID()}`,
+          id,
           name: toolCall.name,
           params: toolCall.params,
           providerExecuted: false
