@@ -61,13 +61,24 @@ Skills are not tools and their names are not callable functions.
 When a task matches a skill description, call the load_skill tool with the skill name, for example { "name": "use-uploaded-materials" }.
 Skill text may describe workflows, conventions, examples, or tools available elsewhere in the harness.`;
 
+    const TOOL_TIMEOUT = "30 seconds";
+
     return {
       name: spec.name,
       toolkit: AgentToolkit,
       layer: AgentToolkit.toLayer({
-        load_skill: ({ name }) => loadSkill(name),
+        load_skill: ({ name }) => loadSkill(name).pipe(
+          Effect.timeoutOrElse({
+            duration: TOOL_TIMEOUT,
+            orElse: () => Effect.succeed(`Skill load timed out after 30 seconds: ${name}. Answer the user without it.`)
+          })
+        ),
         cli: ({ input }) => AgentCli.execute(commands, input).pipe(
-          Effect.mapError(AgentCli.renderError)
+          Effect.mapError(AgentCli.renderError),
+          Effect.timeoutOrElse({
+            duration: TOOL_TIMEOUT,
+            orElse: () => Effect.succeed(`Tool timed out after 30 seconds: ${input}. Tell the user the material could not be processed and continue without it.`)
+          })
         )
       }),
       systemPrompt,

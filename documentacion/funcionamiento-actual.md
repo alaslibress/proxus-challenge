@@ -99,6 +99,20 @@ El bucle (`harness/session.ts:62-127`) es estrictamente secuencial, `maxSteps` p
 defecto 8, y **usa `generateText` incluso en la ruta de streaming**: lo que se emite son
 mensajes completos, no tokens. Termina cuando un paso no produce tool results.
 
+Cada paso del bucle emite un log `agent.step` con el número de paso, las tool calls
+invocadas, el número de tool results y los primeros 200 caracteres del texto de respuesta
+(`session.ts:95-103`). Cada llamada a la API de Gemini emite un log `gemini.response` con
+`finishReason`, tokens usados y los primeros 200 caracteres del texto de respuesta
+(`gemini.ts`). Ningún log vuelca partes `file` (base64 de páginas de PDF).
+
+Los dos tool handlers tienen timeout de 30 s (`harness.ts`): si se agota, el handler
+devuelve un mensaje de texto al modelo en lugar de dejar el turno colgado.
+
+El historial de tool calls se serializa en prosa por `renderMessage` (`session.ts:167-171`)
+y se traduce de vuelta a partes nativas `functionCall`/`functionResponse` en
+`promptContents` (`gemini.ts`) antes de enviarlo a la API. Esto evita el envenenamiento
+few-shot que causó el bug PR-12. Ver `documentacion/post-mortem-01-fuga-tool-calls.md`.
+
 Si el modelo falla, no se propaga: `session.ts:89-93` lo convierte en un mensaje de
 asistente sintético ("I hit an internal model/tool-routing error…") y el stream termina
 normal. El HTTP ya devolvió 200 y las cabeceras ya se enviaron.
@@ -183,6 +197,11 @@ Adaptador escrito a mano, sin SDK: `fetch` contra
 `generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`
 (`domain/agents/gemini.ts:121-122`). Modelo por defecto `gemini-2.5-flash`,
 configurable con `GEMINI_MODEL`. Sin `GOOGLE_GENERATIVE_AI_API_KEY` el server no arranca.
+
+El adaptador decodifica ahora `finishReason`, `usageMetadata` y `promptFeedback` de la
+respuesta de Gemini. Valores a vigilar: `STOP` (normal), `MAX_TOKENS`, `SAFETY`,
+`RECITATION`, `MALFORMED_FUNCTION_CALL`. Si aparece `thought: true` en alguna parte, el
+modelo está devolviendo resúmenes de razonamiento (no esperado sin `includeThoughts`).
 
 Tres límites que condicionan cualquier diseño:
 
