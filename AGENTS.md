@@ -28,6 +28,12 @@ pnpm --filter @proxus/server run typecheck
 - React app lives in `packages/web/src`.
 - Vite config lives in `packages/web/vite.config.ts`.
 - Tailwind output is generated into `packages/web/src/styles.generated.css` by package scripts.
+- **Design system**: all colors, typography, radii, shadows, and motion tokens live in `packages/web/src/styles.input.css` (`@theme` block). See `documentacion/design-system.md` for the full token reference, component recipes, and mapping from old literal classes.
+- **No literal Tailwind color classes** (`bg-slate-*`, `text-sky-*`, etc.) in `packages/web/src`. Every color must come from a design token. Run the guard before any UI PR:
+  ```bash
+  grep -rnE '(bg|text|border|ring|from|to|via|fill|stroke|placeholder|divide|shadow|accent)-(slate|sky|indigo|emerald|red|blue|gray|zinc|neutral|stone|violet|purple)-[0-9]{2,3}' packages/web/src/
+  ```
+  Must return 0 results.
 
 ## AI / local config
 

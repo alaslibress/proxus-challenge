@@ -3,17 +3,157 @@
 @source "./**/*.{ts,tsx,html}";
 @source "../node_modules/streamdown/dist/*.js";
 
+@theme {
+  /* Superficies */
+  --color-canvas: #FBFAFE;
+  --color-surface: #FFFFFF;
+  --color-surface-raised: #F5F2FC;
+  --color-surface-sunken: #F7F4FD;
+  --color-surface-muted: #F1EDFB;
+  --color-track: #E4DEF3;
+
+  /* Texto */
+  --color-ink: #14102A;
+  --color-ink-soft: #2E2748;
+  --color-ink-mute: #5B5478;
+  --color-ink-faint: #5F5975;
+
+  /* Líneas */
+  --color-line: rgba(20, 16, 42, 0.09);
+  --color-line-soft: rgba(20, 16, 42, 0.06);
+  --color-line-strong: rgba(20, 16, 42, 0.14);
+
+  /* Marca */
+  --color-brand: #6B33DC;
+  --color-brand-hover: #5A29C0;
+  --color-brand-lift: #7C46E8;
+  --color-brand-glow: #8B5CF2;
+  --color-brand-tint: rgba(131, 79, 240, 0.12);
+  --color-brand-tint-strong: rgba(131, 79, 240, 0.22);
+  --color-focus-ring: rgba(107, 51, 220, 0.2);
+  --color-focus-line: rgba(145, 96, 242, 0.6);
+
+  /* Semánticos — acierto / BUENO */
+  --color-good: #0D9488;
+  --color-good-ink: #0F766E;
+  --color-good-tint: rgba(13, 148, 136, 0.09);
+  --color-good-line: rgba(13, 148, 136, 0.28);
+
+  /* Semánticos — revisión / MALO */
+  --color-warn: #D97706;
+  --color-warn-ink: #B45309;
+  --color-warn-tint: rgba(217, 119, 6, 0.09);
+  --color-warn-line: rgba(217, 119, 6, 0.28);
+
+  /* Semánticos — citas */
+  --color-cite: #0284C7;
+  --color-cite-ink: #0369A1;
+  --color-cite-tint: rgba(2, 132, 199, 0.07);
+  --color-cite-line: rgba(2, 132, 199, 0.45);
+
+  /* Semánticos — error de sistema (extensión del thinker) */
+  --color-danger: #DC2626;
+  --color-danger-ink: #B91C1C;
+  --color-danger-tint: rgba(220, 38, 38, 0.08);
+  --color-danger-line: rgba(220, 38, 38, 0.28);
+
+  /* Tipografía */
+  --font-sans: Geist, ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "Geist Mono", ui-monospace, SFMono-Regular, monospace;
+
+  /* Escala tipográfica */
+  --text-micro: 11px;
+  --text-xs: 12px;
+  --text-sm: 12.5px;
+  --text-base: 13px;
+  --text-md: 13.5px;
+  --text-body: 14.5px;
+  --text-lg: 15px;
+  --text-question: 19px;
+  --text-title: 20px;
+  --text-display: 30px;
+
+  /* Radios */
+  --radius-xs: 6px;
+  --radius-sm: 7px;
+  --radius-md: 10px;
+  --radius-lg: 12px;
+  --radius-xl: 14px;
+  --radius-2xl: 16px;
+  --radius-3xl: 18px;
+
+  /* Sombras */
+  --shadow-card: 0 1px 2px rgba(20, 16, 42, 0.04);
+  --shadow-panel: 0 1px 3px rgba(20, 16, 42, 0.05);
+  --shadow-brand-sm: 0 4px 14px rgba(107, 51, 220, 0.24);
+  --shadow-brand: 0 6px 20px rgba(107, 51, 220, 0.28);
+
+  /* Movimiento */
+  --ease-dc: cubic-bezier(0.32, 0.72, 0, 1);
+}
+
 @layer base {
   :root {
-    color-scheme: dark;
+    color-scheme: light;
   }
 
   body {
     margin: 0;
+    background: var(--color-canvas);
+    color: var(--color-ink);
+    font-family: var(--font-sans);
+    -webkit-font-smoothing: antialiased;
   }
 
   button,
-  textarea {
+  textarea,
+  input {
     font: inherit;
+  }
+
+  ::selection {
+    background: rgba(107, 51, 220, 0.28);
+  }
+
+  ::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  ::-webkit-scrollbar-thumb {
+    background: var(--color-track);
+    border-radius: 999px;
+    border: 3px solid var(--color-canvas);
+  }
+
+  @keyframes pxPulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.4; }
+  }
+
+  @keyframes pxRise {
+    from { opacity: 0; transform: translateY(6px); }
+    to   { opacity: 1; transform: translateY(0); }
+  }
+
+  @keyframes pxGlow {
+    0%, 100% { box-shadow: 0 0 0 0 rgba(107, 51, 220, 0); }
+    50%       { box-shadow: 0 0 12px 4px rgba(107, 51, 220, 0.3); }
+  }
+
+  @keyframes pxSweep {
+    from { transform: scaleX(0); transform-origin: left; }
+    to   { transform: scaleX(1); transform-origin: left; }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    * {
+      animation-duration: 0.01ms !important;
+      transition-duration: 0.01ms !important;
+    }
   }
 }
