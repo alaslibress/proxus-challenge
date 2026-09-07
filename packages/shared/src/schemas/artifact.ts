@@ -79,6 +79,34 @@ export const Artifact = Schema.Union([
 export type Artifact = typeof Artifact.Type;
 export type ArtifactKind = Artifact["kind"];
 
+export const CreateNoteArtifactInput = Schema.Struct({
+  kind: Schema.Literal("note"),
+  title: Schema.String,
+  markdown: Schema.String
+});
+export type CreateNoteArtifactInput = typeof CreateNoteArtifactInput.Type;
+
+export const CreateQuizArtifactInput = Schema.Struct({
+  kind: Schema.Literal("quiz"),
+  title: Schema.String,
+  questions: Schema.Array(QuizQuestion)
+});
+export type CreateQuizArtifactInput = typeof CreateQuizArtifactInput.Type;
+
+export const CreateTestArtifactInput = Schema.Struct({
+  kind: Schema.Literal("test"),
+  title: Schema.String,
+  questions: Schema.Array(TestQuestion)
+});
+export type CreateTestArtifactInput = typeof CreateTestArtifactInput.Type;
+
+export const CreateArtifactInput = Schema.Union([
+  CreateNoteArtifactInput,
+  CreateQuizArtifactInput,
+  CreateTestArtifactInput
+]);
+export type CreateArtifactInput = typeof CreateArtifactInput.Type;
+
 export const ArtifactSummary = Schema.Struct({
   id: Schema.String,
   kind: Schema.Union([
@@ -242,3 +270,12 @@ export const SubmitAttemptInput = Schema.Union([
   SubmitTestAttemptInput
 ]);
 export type SubmitAttemptInput = typeof SubmitAttemptInput.Type;
+
+export const ListArtifactsInput = Schema.Struct({
+  kind: Schema.optional(Schema.Union([
+    Schema.Literal("note"),
+    Schema.Literal("quiz"),
+    Schema.Literal("test")
+  ]))
+});
+export type ListArtifactsInput = typeof ListArtifactsInput.Type;

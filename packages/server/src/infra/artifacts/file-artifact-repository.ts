@@ -2,20 +2,22 @@ import { Effect, FileSystem, Layer, Path, Schema } from "effect";
 import {
   Artifact,
   ArtifactAttempt,
+  CreateArtifactInput,
+  ListArtifactsInput,
+  SubmitAttemptInput,
+  type Artifact as ArtifactType,
+  type ArtifactAttempt as ArtifactAttemptType
+} from "@proxus/shared";
+import {
   ArtifactNotFound,
   ArtifactRepository,
   ArtifactRepositorySerializationError,
   ArtifactRepositoryStorageError,
   ArtifactTypeMismatch,
   AttemptNotFound,
-  CreateArtifactInput,
-  ListArtifactsInput,
-  SubmitAttemptInput,
   gradeAttempt,
   makeArtifact,
   makeUngradedAttempt,
-  type Artifact as ArtifactType,
-  type ArtifactAttempt as ArtifactAttemptType,
   type ArtifactRepository as ArtifactRepositoryType,
   type ArtifactRepositoryError
 } from "../../domain/artifacts/artifact.ts";
