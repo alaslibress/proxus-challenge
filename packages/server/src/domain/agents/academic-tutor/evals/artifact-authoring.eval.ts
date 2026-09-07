@@ -6,14 +6,16 @@ import { makeAcademicTutorHarness } from "../../academic-tutor.ts";
 import {
   Artifact,
   ArtifactAttempt,
+  type CreateArtifactInput,
+  type ListArtifactsInput,
+  type SubmitAttemptInput
+} from "@proxus/shared";
+import {
   ArtifactNotFound,
   ArtifactRepository,
   ArtifactTypeMismatch,
   AttemptNotFound,
   type ArtifactRepositoryError,
-  type CreateArtifactInput,
-  type ListArtifactsInput,
-  type SubmitAttemptInput,
   gradeAttempt
 } from "../../../artifacts/artifact.ts";
 import {

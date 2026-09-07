@@ -285,5 +285,5 @@ La UI mantiene estado local para cosas efímeras como input del chat, artifact s
 
 - Persistencia por filesystem: simple y fácil de inspeccionar, no orientada a concurrencia fuerte.
 - Algunas rutas usan Effect HTTP API; el stream del chat usa NDJSON manual.
-- Hay schemas de artifacts en `shared` y dominio server; hay que evitar drift si se cambian.
+- Los schemas de artifacts son SSOT en `packages/shared/src/schemas/artifact.ts`; el dominio del server los importa de ahí.
 - El proyecto prioriza legibilidad para challenge sobre completitud productiva.

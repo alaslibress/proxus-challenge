@@ -2,7 +2,8 @@ import { Effect, Layer } from "effect";
 import { HttpApiBuilder } from "effect/unstable/httpapi";
 import { ProxusApi } from "@proxus/shared";
 import { TutorChatService } from "../../domain/agents/academic-tutor/tutor-chat-service.ts";
-import { ArtifactRepository, type Artifact } from "../../domain/artifacts/artifact.ts";
+import { type Artifact } from "@proxus/shared";
+import { ArtifactRepository } from "../../domain/artifacts/artifact.ts";
 import { MaterialRepository } from "../../domain/materials/material.ts";
 
 export const TutorHttpHandlers = HttpApiBuilder.group(

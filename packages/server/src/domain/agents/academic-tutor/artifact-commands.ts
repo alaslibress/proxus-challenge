@@ -3,15 +3,17 @@ import * as AgentCli from "../harness/index.ts";
 import {
   Artifact,
   ArtifactAttempt,
+  CreateArtifactInput,
+  SubmitAttemptInput
+} from "@proxus/shared";
+import {
   ArtifactNotFound,
   ArtifactRepositoryStorageError,
   ArtifactRepositorySerializationError,
   ArtifactTypeMismatch,
   AttemptNotFound,
-  CreateArtifactInput,
   QuestionNotFound,
   AnswerTypeMismatch,
-  SubmitAttemptInput,
   type ArtifactRepository
 } from "../../artifacts/artifact.ts";
 
