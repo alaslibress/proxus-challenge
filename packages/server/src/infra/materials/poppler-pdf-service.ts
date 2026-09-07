@@ -45,7 +45,7 @@ const make = (): Effect.Effect<PdfServiceType, PdfServiceError, ChildProcessSpaw
     const outputPrefix = path.join(tempDirectory, `page-${page}`);
     const imagePath = `${outputPrefix}.png`;
 
-    yield* spawner.exitCode(
+    const exitCode = yield* spawner.exitCode(
       ChildProcess.make("pdftoppm", [
         "-singlefile",
         "-f",
@@ -62,6 +62,12 @@ const make = (): Effect.Effect<PdfServiceType, PdfServiceError, ChildProcessSpaw
       Effect.mapError((reason) => new PdfServiceError({ reason }))
     );
 
+    if (exitCode !== 0) {
+      return yield* new PdfServiceError({
+        reason: `pdftoppm exited with code ${exitCode} rendering page ${page} of ${pdfPath}`
+      });
+    }
+
     const bytes = yield* fs.readFile(imagePath).pipe(
       Effect.mapError((reason) => new PdfServiceError({ reason }))
     );
@@ -75,7 +81,12 @@ const make = (): Effect.Effect<PdfServiceType, PdfServiceError, ChildProcessSpaw
       mediaType: "image/png" as const,
       data: `data:image/png;base64,${uint8ArrayToBase64(bytes)}`
     };
-  });
+  }).pipe(
+    Effect.timeoutOrElse({
+      duration: "20 seconds",
+      orElse: () => Effect.fail(new PdfServiceError({ reason: `pdftoppm timed out after 20 seconds rendering page ${page} of ${pdfPath}` }))
+    })
+  );
 
   return { pageCount, renderPage };
 });

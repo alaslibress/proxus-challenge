@@ -92,6 +92,16 @@ function execute(
         })
       );
 
+      yield* Effect.log("agent.step").pipe(
+        Effect.annotateLogs({
+          step,
+          maxSteps,
+          toolCalls: response.toolCalls.map((c) => c.name),
+          toolResults: response.toolResults.length,
+          textPreview: response.text.slice(0, 200)
+        })
+      );
+
       for (const toolCall of response.toolCalls) {
         yield* appendMessage(AgentMessage.toolCall(toolCall.name, toolCall.params));
       }

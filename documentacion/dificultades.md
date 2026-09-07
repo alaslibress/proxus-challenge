@@ -63,3 +63,53 @@ Registro de obstáculos encontrados durante la implementación, con síntoma, ca
 **Solución pendiente**: verificar con DevTools o una herramienta de contraste tras levantar la app. Si no llega a 4.5:1, se notifica al thinker para ajustar el token (no se cambia por cuenta propia).
 
 **Descartado**: bajar el umbral a 3:1 (WCAG AA para texto grande) sin confirmar con producto.
+
+---
+
+## PR-12 — Fuga de sintaxis de tool call como texto
+
+### `Effect.timeoutTo` no existe en 4.0.0-beta.83
+
+**Síntoma**: el plan referenciaba `Effect.timeoutTo`; TypeScript no lo encontraba.
+
+**Causa**: en v4 beta el API es `Effect.timeoutOrElse` (con `orElse: () => Effect<A2>`). No hay función `timeoutTo`.
+
+**Solución**: `Effect.timeoutOrElse({ duration, orElse: () => Effect.succeed(fallbackString) })`.
+
+**Descartado**: `Effect.timeout` (falla con `TimeoutException`, no devuelve un fallback).
+
+---
+
+### `Response.makePart` devuelve `Part` (decoded) pero `LanguageModel.make` espera `PartEncoded`
+
+**Síntoma**: la función `generateText` en `LanguageModel.make` espera `Array<Response.PartEncoded>`, pero `makePart` devuelve tipos decoded (`TextPart`, `ToolCallPart`, etc.).
+
+**Causa**: en v4 beta los tipos decoded y encoded son estructuralmente compatibles (el decoded añade `PartTypeId` simbólico que no bloquea la asignación estructural). El código original pasaba el typecheck sin cast.
+
+**Solución**: en el nuevo código (donde el tipo se hace explícito a través de `ResponsePartsResult`), se usa `as unknown as Response.PartEncoded` para no perder tiempo en un problema de tipos no observable en runtime.
+
+**Descartado**: cambiar la interfaz `ResponsePartsResult.parts` a `AnyPart[]` (más ruidoso en tipos downstream).
+
+---
+
+### `promptContents` necesita sincronía con `renderMessage` (deuda PR-12 Opción A)
+
+**Síntoma**: las dos regex `TOOL_CALL_RE` / `TOOL_RESULT_RE` en `gemini.ts:promptContents` reconocen el formato que produce `renderMessage` en `session.ts`. Si uno cambia sin el otro, el historial deja de traducirse a partes nativas.
+
+**Causa**: la Opción A del plan es un parche local. La solución correcta (Opción B) exige cambiar `AgentMessage` y el contrato NDJSON; se postergó al PR-05.
+
+**Solución**: comentario en el código señalando la dependencia. El doer la ha marcado como deuda.
+
+**Descartado**: implementar la Opción B en este PR (4 sitios afectados + cambio de contrato de streaming).
+
+---
+
+### `yield* Effect.fail(new TaggedError(...))` lint error TS29 en poppler
+
+**Síntoma**: el compilador (regla TS29 de Effect) rechaza `yield* Effect.fail(new PdfServiceError(...))`.
+
+**Causa**: `TaggedError` implementa la interfaz `Yieldable`, así que `yield* new PdfServiceError(...)` es la forma correcta en v4.
+
+**Solución**: `return yield* new PdfServiceError({ reason: ... })`.
+
+**Descartado**: `throw new PdfServiceError(...)` (no es una operación de Effect y rompe el tipo de retorno).
