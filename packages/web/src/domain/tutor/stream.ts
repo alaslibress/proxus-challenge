@@ -5,18 +5,35 @@ import { apiClientConfig } from "../../api-client/config.ts";
 const TutorChatStreamEventFromJsonString = Schema.fromJsonString(TutorChatStreamEvent);
 const decodeEvent = Schema.decodeUnknownSync(TutorChatStreamEventFromJsonString);
 
-export async function* streamTutorMessage(input: TutorChatRequest): AsyncGenerator<TutorChatStreamEventType> {
+export interface StreamOptions {
+  readonly signal?: AbortSignal;
+}
+
+export const isAbortError = (cause: unknown): boolean =>
+  cause instanceof DOMException && cause.name === "AbortError";
+
+export async function* streamTutorMessage(
+  input: TutorChatRequest,
+  options?: StreamOptions
+): AsyncGenerator<TutorChatStreamEventType> {
   const response = await fetch(`${apiClientConfig.apiUrl}/api/tutor/chat/stream`, {
     method: "POST",
     headers: {
       "content-type": "application/json",
       "accept": "application/x-ndjson"
     },
-    body: JSON.stringify(input)
+    body: JSON.stringify(input),
+    ...(options?.signal !== undefined ? { signal: options.signal } : {})
   });
 
   if (!response.ok) {
-    throw new Error(await response.text());
+    const raw = await response.text().catch(() => "");
+    console.error("tutor stream failed", response.status, raw);
+    throw new Error(
+      response.status >= 500
+        ? "The tutor service failed while answering. Try again."
+        : "The tutor service rejected the request."
+    );
   }
 
   if (response.body === null) {
@@ -27,28 +44,32 @@ export async function* streamTutorMessage(input: TutorChatRequest): AsyncGenerat
   const decoder = new TextDecoder();
   let buffer = "";
 
-  while (true) {
-    const { value, done } = await reader.read();
+  try {
+    while (true) {
+      const { value, done } = await reader.read();
 
-    if (done) {
-      break;
-    }
+      if (done) {
+        break;
+      }
 
-    buffer += decoder.decode(value, { stream: true });
-    const lines = buffer.split("\n");
-    buffer = lines.pop() ?? "";
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split("\n");
+      buffer = lines.pop() ?? "";
 
-    for (const line of lines) {
-      const trimmed = line.trim();
-      if (trimmed.length > 0) {
-        yield decodeEvent(trimmed);
+      for (const line of lines) {
+        const trimmed = line.trim();
+        if (trimmed.length > 0) {
+          yield decodeEvent(trimmed);
+        }
       }
     }
-  }
 
-  buffer += decoder.decode();
-  const remaining = buffer.trim();
-  if (remaining.length > 0) {
-    yield decodeEvent(remaining);
+    buffer += decoder.decode();
+    const remaining = buffer.trim();
+    if (remaining.length > 0) {
+      yield decodeEvent(remaining);
+    }
+  } finally {
+    await reader.cancel().catch(() => {});
   }
 }
