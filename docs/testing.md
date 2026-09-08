@@ -47,7 +47,44 @@ tests automáticos de arriba no.
 ```bash
 pnpm --filter @proxus/server run eval:tutor:artifact-authoring
 pnpm --filter @proxus/server run agent:tutor "Crea un quiz corto de una pregunta sobre variables cualitativas"
+
+# el panel de evaluación de punta a punta, sin levantar la app:
+#   panel:check <respuestaAlumno> <respuestaEsperada> <materialId> <página>
+pnpm --filter @proxus/server run panel:check \
+  "Un gráfico técnicamente impecable que cuenta la historia equivocada no sirve" \
+  "Un gráfico técnicamente perfecto que cuenta la historia equivocada es tan inútil como uno bonito pero confuso" \
+  guiaMuestraDeDatos 2
+
+# salida estructurada nativa (generateObject + responseSchema) contra Gemini:
+pnpm --filter @proxus/server run structured-output:check
 ```
+
+`panel:check` es el **único** paso que mide si los prompts del panel son buenos: imprime
+la crítica de Profe Bueno, la de Profe Malo y el JSON del Juez, y deja la traza en
+`packages/server/.data/sessions/panel-check-<timestamp>.md`. El `materialId` es el nombre
+del PDF sin `.pdf` dentro de `packages/server/.data/materials/pdfs/`, y la página debe
+tener capa de texto.
+
+### QA que sigue sin poder ejecutarse
+
+**Estado a 8-sep-2026: los tres scripts de arriba fallan con `429 RESOURCE_EXHAUSTED`**
+(*"Quota exceeded for metric: generate_content_free_tier_requests, limit: 20"*) con la key
+de free tier del repo. Queda por verificar en vivo, cuando haya cuota o una key de pago:
+
+- que el Juez acierta con una paráfrasis correcta y **cita literalmente** la página, es
+  decir que sale al menos una `verified: true` (`panel:check`);
+- que una respuesta claramente incorrecta **no** sube la nota;
+- que `generateObject` decodifica contra `FinalFeedbackSchema` sin reintentos
+  (`structured-output:check`);
+- los tres casos de `eval:tutor:artifact-authoring`.
+
+Lo que **sí** se ha comprobado en vivo con la key agotada: `panel:check` llega a Poppler,
+extrae el texto real de la página, lanza las tres llamadas y —al caer las tres con 429—
+el motor devuelve `EvaluationUnavailable`, la traza recoge el motivo de cada fallo y la
+nota se queda en la determinista. La ruta de degradación es real, no sólo de laboratorio.
+
+Ojo con `GEMINI_MODEL`: `gemini-2.5-flash` devuelve **404 "no longer available to new
+users"**. `.env.example` apunta ya a `gemini-3.6-flash`.
 
 ## QA manual recomendado
 

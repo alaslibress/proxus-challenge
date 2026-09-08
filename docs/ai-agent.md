@@ -194,7 +194,7 @@ fallar, ni siquiera si el directorio de trazas no tiene permisos de escritura. E
 
 ```env
 GOOGLE_GENERATIVE_AI_API_KEY=...
-GEMINI_MODEL=gemini-2.5-flash
+GEMINI_MODEL=gemini-3.6-flash
 ```
 
 ## Buenas prácticas al tocar AI

@@ -1,4 +1,5 @@
 import { Console, Effect, Layer } from "effect";
+import * as NodeServices from "@effect/platform-node/NodeServices";
 import { LanguageModel } from "effect/unstable/ai";
 import { GeminiModel } from "../agents/gemini.ts";
 import { FileMaterialRepository } from "../../infra/materials/file-material-repository.ts";
@@ -87,9 +88,12 @@ const program = Effect.gen(function* () {
     EvaluationEngineServiceLive,
     GeminiModel,
     FileMaterialRepository.layer(".data/materials/pdfs").pipe(
-      Layer.provide(PopplerPdfService.layer)
+      Layer.provide(PopplerPdfService.layer),
+      Layer.provide(NodeServices.layer)
     ),
-    FileEvaluationTrace.layer(".data/sessions")
+    FileEvaluationTrace.layer(".data/sessions").pipe(
+      Layer.provide(NodeServices.layer)
+    )
   ))
 );
 

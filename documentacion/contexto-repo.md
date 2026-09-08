@@ -6,7 +6,7 @@ Mapa de arquitectura y comandos. Lectura obligatoria para el doer antes de imple
 
 ## Commands
 
-Node 20+, pnpm only (never Bun — no `Bun.serve`, `Bun.file`, `bun:*`). Setup: `pnpm install`, then `cp .env.example .env` and set `GOOGLE_GENERATIVE_AI_API_KEY`. Poppler (`pdfinfo`, `pdftoppm`) must be on PATH or the server refuses to start.
+Node 22.18+, pnpm only (never Bun — no `Bun.serve`, `Bun.file`, `bun:*`). Setup: `pnpm install`, then `cp .env.example .env` and set `GOOGLE_GENERATIVE_AI_API_KEY`. Poppler (`pdfinfo`, `pdftoppm`, `pdftotext`) must be on PATH or the server refuses to start.
 
 ```bash
 pnpm run dev                                  # server (:3000) + web (:5173) in parallel
