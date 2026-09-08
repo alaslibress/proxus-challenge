@@ -25,17 +25,18 @@ const make = (): Effect.Effect<PdfServiceType, PdfServiceError, ChildProcessSpaw
   yield* assertExecutable("pdfinfo");
   yield* assertExecutable("pdftoppm");
 
+  // Throwing inside `Effect.map` would produce a defect, which no `mapError` can
+  // convert: an unreadable PDF would then be a 500 instead of a rejected upload.
   const pageCount = (pdfPath: string) => spawner.string(
     ChildProcess.make("pdfinfo", [pdfPath])
   ).pipe(
-    Effect.map((output) => {
+    Effect.mapError((reason) => new PdfServiceError({ reason })),
+    Effect.flatMap((output) => {
       const match = /^Pages:\s+(\d+)$/m.exec(output);
-      if (match === null) {
-        throw new Error(`Could not read page count for ${pdfPath}`);
-      }
-      return Number(match[1]);
-    }),
-    Effect.mapError((reason) => new PdfServiceError({ reason }))
+      return match === null
+        ? Effect.fail(new PdfServiceError({ reason: `Could not read page count for ${pdfPath}` }))
+        : Effect.succeed(Number(match[1]));
+    })
   );
 
   const renderPage: PdfServiceType["renderPage"] = ({ path: pdfPath, page, dpi = 144 }) => Effect.gen(function* () {

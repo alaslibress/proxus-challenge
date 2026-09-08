@@ -85,6 +85,11 @@ export function Chat() {
             </div>
           </div>
         )}
+        {chat.stopped && chat.status === "idle" && (
+          <p className="px-6 text-ink-faint m-0" style={{ fontSize: 12 }}>
+            Stopped
+          </p>
+        )}
       </section>
 
       {chat.error === undefined ? null : (

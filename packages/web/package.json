@@ -5,8 +5,8 @@
   "type": "module",
   "main": "./src/main.tsx",
   "scripts": {
-    "dev": "tailwindcss -i src/styles.input.css -o src/styles.generated.css && sh -c 'tailwindcss -i src/styles.input.css -o src/styles.generated.css --watch & vite; kill $!'",
-    "build": "tailwindcss -i src/styles.input.css -o src/styles.generated.css --minify && vite build",
+    "dev": "vite",
+    "build": "vite build",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run",
     "test:watch": "vitest"
@@ -23,7 +23,7 @@
     "tailwindcss": "^4.3.1"
   },
   "devDependencies": {
-    "@tailwindcss/cli": "^4.3.1",
+    "@tailwindcss/vite": "^4.3.3",
     "@vitejs/plugin-react": "^6.0.2",
     "vite": "^8.0.16",
     "vitest": "^5.0.0"
