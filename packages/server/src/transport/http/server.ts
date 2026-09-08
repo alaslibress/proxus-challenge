@@ -4,10 +4,13 @@ import { createServer } from "node:http";
 import { HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/unstable/http";
 import { HttpApiBuilder, HttpApiScalar } from "effect/unstable/httpapi";
 import { LanguageModel } from "effect/unstable/ai";
-import { ProxusApi, TutorChatRequest, TutorChatStreamEvent } from "@proxus/shared";
+import { AttemptStreamEvent, ProxusApi, SubmitAttemptInput, TutorChatRequest, TutorChatStreamEvent } from "@proxus/shared";
 import { GeminiModel } from "../../domain/agents/gemini.ts";
 import { TutorChatService, TutorChatServiceLive } from "../../domain/agents/academic-tutor/tutor-chat-service.ts";
-import { EvaluationEngineServiceLive } from "../../domain/evaluation/engine.ts";
+import { EvaluationEngineService, EvaluationEngineServiceLive } from "../../domain/evaluation/engine.ts";
+import { reviewGradedAttemptStreaming } from "../../domain/evaluation/review.ts";
+import { ArtifactRepository } from "../../domain/artifacts/artifact.ts";
+import { MaterialRepository } from "../../domain/materials/material.ts";
 import { FileArtifactRepository } from "../../infra/artifacts/file-artifact-repository.ts";
 import { FileMaterialRepository } from "../../infra/materials/file-material-repository.ts";
 import { PopplerPdfService } from "../../infra/materials/poppler-pdf-service.ts";
@@ -25,8 +28,20 @@ const DocsRoute = HttpApiScalar.layer(ProxusApi, {
 
 const encoder = new TextEncoder();
 
-const encodeNdjson = (event: TutorChatStreamEvent) =>
-  encoder.encode(`${JSON.stringify(Schema.encodeSync(TutorChatStreamEvent)(event))}\n`);
+// A frame that fails to encode must not tumble the whole stream: emit an `error` frame
+// in its place instead. This is the server half of the ADR-02 resilience contract; the
+// client half lives in packages/web/src/lib/ndjson.ts.
+const makeNdjsonEncoder = <A>(schema: Schema.Codec<A, unknown>) => (event: A) => {
+  try {
+    return encoder.encode(`${JSON.stringify(Schema.encodeSync(schema)(event))}\n`);
+  } catch (cause) {
+    console.error("ndjson encode failed", cause);
+    return encoder.encode(`${JSON.stringify({ type: "error", message: "Failed to encode stream event" })}\n`);
+  }
+};
+
+const encodeNdjson = makeNdjsonEncoder(TutorChatStreamEvent);
+const encodeAttemptNdjson = makeNdjsonEncoder(AttemptStreamEvent);
 
 const TutorStreamRoute = HttpRouter.add("POST", "/api/tutor/chat/stream", () =>
   Effect.gen(function* () {
@@ -48,7 +63,48 @@ const TutorStreamRoute = HttpRouter.add("POST", "/api/tutor/chat/stream", () =>
   })
 );
 
-const Routes = Layer.mergeAll(ApiRoutes, DocsRoute, TutorStreamRoute);
+const AttemptStreamRoute = HttpRouter.add("POST", "/api/artifacts/:id/submit/stream", () =>
+  Effect.gen(function* () {
+    const params = yield* HttpRouter.params;
+    const artifactId = params.id;
+
+    if (artifactId === undefined) {
+      return yield* HttpServerResponse.json({ message: "Missing artifact id" }, { status: 400 });
+    }
+
+    const payload = yield* HttpServerRequest.schemaBodyJson(SubmitAttemptInput);
+    const artifacts = yield* ArtifactRepository;
+    const languageModel = yield* LanguageModel.LanguageModel;
+    const evaluationEngine = yield* EvaluationEngineService;
+    const materialRepository = yield* MaterialRepository;
+
+    const submitted = yield* artifacts.submitAttempt({ ...payload, artifactId }).pipe(Effect.orDie);
+    const graded = yield* artifacts.gradeAttempt(submitted.id).pipe(Effect.orDie);
+    const artifact = yield* artifacts.getArtifact(graded.artifactId).pipe(Effect.orDie);
+
+    const body = reviewGradedAttemptStreaming(artifact, graded).pipe(
+      Stream.tap((event) =>
+        event.type === "done"
+          ? artifacts.saveAttempt(event.payload).pipe(Effect.orDie)
+          : Effect.void
+      ),
+      Stream.provideService(LanguageModel.LanguageModel, languageModel),
+      Stream.provideService(EvaluationEngineService, evaluationEngine),
+      Stream.provideService(MaterialRepository, materialRepository),
+      Stream.map(encodeAttemptNdjson)
+    );
+
+    return HttpServerResponse.stream(body, {
+      contentType: "application/x-ndjson",
+      headers: {
+        "cache-control": "no-cache",
+        "x-accel-buffering": "no"
+      }
+    });
+  })
+);
+
+const Routes = Layer.mergeAll(ApiRoutes, DocsRoute, TutorStreamRoute, AttemptStreamRoute);
 
 const DomainLive = Layer.mergeAll(
   TutorChatServiceLive,

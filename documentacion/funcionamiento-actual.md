@@ -57,11 +57,14 @@ Chat.tsx ──fetch POST /api/tutor/chat/stream──► server.ts (HttpRouter 
   `\n`. La unión de frames es de **solo dos miembros** hoy
   (`packages/shared/src/api/tutor.ts:19-28`):
   `{type:"message", message: AgentMessage}` y `{type:"done"}`.
-- El consumidor está en `packages/web/src/domain/tutor/stream.ts`: buffer + `split("\n")`
-  + `TextDecoder({stream:true})`, correcto con líneas partidas y UTF-8 partido. Pero
-  decodifica con **`Schema.decodeUnknownSync`**, que lanza: **un frame de tipo
-  desconocido revienta el generador y mata el stream entero**. Server y web tienen que
-  desplegarse juntos ante cualquier cambio de protocolo.
+- El consumidor genérico está en `packages/web/src/lib/ndjson.ts` (`readNdjson`, PR-05):
+  buffer + `split("\n")` + `TextDecoder({stream:true})`, correcto con líneas partidas y
+  UTF-8 partido. Cada línea se decodifica dentro de un `try/catch`: si una línea no
+  encaja en la unión, se hace `console.warn` con la línea y **se continúa con la
+  siguiente**, en vez de reventar el generador. `packages/web/src/domain/tutor/stream.ts`
+  lo usa para el chat; el consumidor del streaming de intentos (Paso 6 de PR-05) queda
+  pendiente porque ese paso quedó desactualizado tras el PR-10 y requiere que el thinker
+  lo reescriba primero.
 - **`AbortSignal` (PR-10)**: el cliente cancela la petición con `AbortController`. **El servidor sí cancela**, verificado midiendo: al cortar el cliente a los 7 s, el `http.span` cierra en ese instante, la llamada a Gemini en vuelo se queda sin respuesta y no se registra un `agent.step` más — igual por la ruta directa que a través del proxy de Vite. La cadena es `NodeHttpServer.ts:195-197` (interrumpe el fiber al cerrarse la conexión) → `Stream.callback` en `harness/session.ts:51` (ata el bucle al scope del stream) → `gemini.ts:335-341` (pasa el `signal` al `fetch`). `Stop` conserva los mensajes ya recibidos y **no** repuebla el input: es una parada limpia, no un deshacer (ver §7).
 
 ---
@@ -351,5 +354,6 @@ Y dos cosas más que hay que saber antes de probar nada:
 
 - **`packages/server/.data/` no existe en un checkout limpio.** Hay que colocar un PDF en
   `packages/server/.data/materials/pdfs/` antes de que la QA manual signifique algo.
-- Todo lo que toque el protocolo NDJSON debe cambiar server y web **en el mismo PR**,
-  porque el cliente decodifica de forma estricta y explota con un frame que no conoce.
+- ~~Todo lo que toque el protocolo NDJSON debe cambiar server y web en el mismo PR~~
+  **Eliminado desde PR-05**: `readNdjson` salta las líneas que no decodifican en vez de
+  reventar, así que un frame nuevo que el cliente todavía no conoce ya no rompe el stream.

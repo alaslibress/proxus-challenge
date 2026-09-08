@@ -55,9 +55,34 @@ Otras respuestas de error, todas **400** con el mismo `_tag`:
 GET /api/artifacts/
 GET /api/artifacts/:id
 POST /api/artifacts/:id/submit
+POST /api/artifacts/:id/submit/stream
 ```
 
 `submit` crea y corrige un intento, devolviendo un attempt con estado `graded` cuando aplica.
+
+`submit/stream` es la misma operación (`submitAttempt` → `gradeAttempt` → revisión del Juez) pero
+en NDJSON, para que el alumno vea progreso mientras se corrigen las respuestas cortas. Igual que
+`/api/tutor/chat/stream`, es una ruta manual de `HttpRouter` y por tanto **no aparece en OpenAPI ni
+en `/docs`**: se consume con `fetch` crudo. `POST /api/artifacts/:id/submit` sigue existiendo sin
+cambios como ruta tipada y como degradación si el streaming falla en el navegador.
+
+Tres tipos de frame:
+
+```json
+{ "type": "status", "value": "evaluating_good", "questionId": "q1", "questionIndex": 0, "questionTotal": 2 }
+{ "type": "status", "value": "evaluating_bad", "questionId": "q1", "questionIndex": 0, "questionTotal": 2 }
+{ "type": "status", "value": "deliberating", "questionId": "q1", "questionIndex": 0, "questionTotal": 2 }
+{ "type": "done", "payload": {} }
+{ "type": "error", "message": "..." }
+```
+
+`value` es uno de `evaluating_good` (profe optimista), `evaluating_bad` (profe crítico, corre en
+paralelo con el anterior) o `deliberating` (el Juez, después de los dos). `questionId`/`questionIndex`/
+`questionTotal` identifican a cuál de las respuestas cortas del test corresponde el estado, porque con
+varias preguntas cortas los tres estados se repiten una vez por pregunta. `done.payload` es el
+`ArtifactAttempt` corregido completo (nota, resumen y una corrección por pregunta), idéntico al que
+devuelve `POST /api/artifacts/:id/submit` con el mismo cuerpo. Un fallo del motor produce un frame
+`error` y el stream se cierra limpiamente: nunca se corta la conexión sin un frame terminal.
 
 ## Tipos de artifact
 
