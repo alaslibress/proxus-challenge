@@ -22,6 +22,7 @@ import {
   MaterialNotFound,
   MaterialRepository,
   type MaterialPageImages,
+  type MaterialPageTexts,
   type PdfMaterial
 } from "../../../materials/material.ts";
 
@@ -283,6 +284,26 @@ const makeMaterialRepository = (materials: readonly MaterialFixture[]) => Materi
       type: "material-page-images",
       material: toPdfMaterial(material),
       pages: renderedPages
+    });
+  },
+  extractText: (id, pages) => {
+    const material = materials.find((candidate) => candidate.id === id);
+    if (material === undefined) {
+      return Effect.fail(new MaterialNotFound({ materialId: id }));
+    }
+
+    const extractedPages = pages.map((page) => {
+      const fixturePage = material.pages.find((candidate) => candidate.page === page);
+      return {
+        page,
+        text: fixturePage?.text ?? `Page ${page}`
+      };
+    });
+
+    return Effect.succeed<MaterialPageTexts>({
+      type: "material-page-texts",
+      material: toPdfMaterial(material),
+      pages: extractedPages
     });
   }
 });

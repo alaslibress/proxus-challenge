@@ -7,6 +7,7 @@ import {
   resolveFileNameCollision,
   sanitizeFileName,
   type MaterialPageImages,
+  type MaterialPageTexts,
   type MaterialRepository as MaterialRepositoryType,
   type PdfMaterial
 } from "../../domain/materials/material.ts";
@@ -140,7 +141,30 @@ export const FileMaterialRepository = {
       };
     });
 
-    return { list, get, save, delete: deleteMaterial, renderPages };
+    const extractText = (
+      id: string,
+      pages: readonly number[]
+    ): Effect.Effect<MaterialPageTexts, MaterialNotFound | MaterialRepositoryError> => Effect.gen(function* () {
+      const file = yield* getFile(id);
+      const invalidPage = pages.find((page) => page < 1 || page > file.material.pageCount);
+      if (invalidPage !== undefined) {
+        return yield* new MaterialRepositoryError({
+          reason: `Page ${invalidPage} is outside 1-${file.material.pageCount} for material ${id}`
+        });
+      }
+
+      const texts = yield* Effect.forEach(pages, (page) => pdf.extractPageText({ path: file.path, page }).pipe(
+        Effect.mapError(mapError)
+      ), { concurrency: 1 });
+
+      return {
+        type: "material-page-texts" as const,
+        material: file.material,
+        pages: texts
+      };
+    });
+
+    return { list, get, save, delete: deleteMaterial, renderPages, extractText };
   }),
   layer: (directory: string) => Layer.effect(MaterialRepository)(FileMaterialRepository.make(directory))
 };

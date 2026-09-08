@@ -1,4 +1,5 @@
 import { Schema } from "effect";
+import { ArtifactSource } from "./citation.ts";
 
 export const QuestionOption = Schema.Struct({
   id: Schema.String,
@@ -12,7 +13,8 @@ export const MultipleChoiceQuestion = Schema.Struct({
   prompt: Schema.String,
   options: Schema.Array(QuestionOption),
   correctOptionId: Schema.String,
-  explanation: Schema.String
+  explanation: Schema.String,
+  sourcePage: Schema.optional(Schema.Number)
 });
 export type MultipleChoiceQuestion = typeof MultipleChoiceQuestion.Type;
 
@@ -21,7 +23,8 @@ export const TrueFalseQuestion = Schema.Struct({
   id: Schema.String,
   prompt: Schema.String,
   correctAnswer: Schema.Boolean,
-  explanation: Schema.String
+  explanation: Schema.String,
+  sourcePage: Schema.optional(Schema.Number)
 });
 export type TrueFalseQuestion = typeof TrueFalseQuestion.Type;
 
@@ -30,7 +33,8 @@ export const ShortAnswerQuestion = Schema.Struct({
   id: Schema.String,
   prompt: Schema.String,
   expectedAnswer: Schema.String,
-  maxScore: Schema.Number
+  maxScore: Schema.Number,
+  sourcePage: Schema.optional(Schema.Number)
 });
 export type ShortAnswerQuestion = typeof ShortAnswerQuestion.Type;
 
@@ -51,7 +55,8 @@ export const NoteArtifact = Schema.Struct({
   kind: Schema.Literal("note"),
   id: Schema.String,
   title: Schema.String,
-  markdown: Schema.String
+  markdown: Schema.String,
+  source: Schema.optional(ArtifactSource)
 });
 export type NoteArtifact = typeof NoteArtifact.Type;
 
@@ -59,7 +64,8 @@ export const QuizArtifact = Schema.Struct({
   kind: Schema.Literal("quiz"),
   id: Schema.String,
   title: Schema.String,
-  questions: Schema.Array(QuizQuestion)
+  questions: Schema.Array(QuizQuestion),
+  source: Schema.optional(ArtifactSource)
 });
 export type QuizArtifact = typeof QuizArtifact.Type;
 
@@ -67,7 +73,8 @@ export const TestArtifact = Schema.Struct({
   kind: Schema.Literal("test"),
   id: Schema.String,
   title: Schema.String,
-  questions: Schema.Array(TestQuestion)
+  questions: Schema.Array(TestQuestion),
+  source: Schema.optional(ArtifactSource)
 });
 export type TestArtifact = typeof TestArtifact.Type;
 
@@ -82,21 +89,24 @@ export type ArtifactKind = Artifact["kind"];
 export const CreateNoteArtifactInput = Schema.Struct({
   kind: Schema.Literal("note"),
   title: Schema.String,
-  markdown: Schema.String
+  markdown: Schema.String,
+  source: Schema.optional(ArtifactSource)
 });
 export type CreateNoteArtifactInput = typeof CreateNoteArtifactInput.Type;
 
 export const CreateQuizArtifactInput = Schema.Struct({
   kind: Schema.Literal("quiz"),
   title: Schema.String,
-  questions: Schema.Array(QuizQuestion)
+  questions: Schema.Array(QuizQuestion),
+  source: Schema.optional(ArtifactSource)
 });
 export type CreateQuizArtifactInput = typeof CreateQuizArtifactInput.Type;
 
 export const CreateTestArtifactInput = Schema.Struct({
   kind: Schema.Literal("test"),
   title: Schema.String,
-  questions: Schema.Array(TestQuestion)
+  questions: Schema.Array(TestQuestion),
+  source: Schema.optional(ArtifactSource)
 });
 export type CreateTestArtifactInput = typeof CreateTestArtifactInput.Type;
 
