@@ -5,6 +5,7 @@ import { TutorChatService } from "../../domain/agents/academic-tutor/tutor-chat-
 import { type Artifact } from "@proxus/shared";
 import { ArtifactRepository } from "../../domain/artifacts/artifact.ts";
 import { MaterialRepository } from "../../domain/materials/material.ts";
+import { reviewGradedAttempt } from "../../domain/evaluation/review.ts";
 import { withUploadedFile } from "./upload.ts";
 
 export const TutorHttpHandlers = HttpApiBuilder.group(
@@ -73,6 +74,11 @@ export const ArtifactsHttpHandlers = HttpApiBuilder.group(
         artifactId: params.id
       }).pipe(
         Effect.flatMap((attempt) => artifacts.gradeAttempt(attempt.id)),
+        Effect.flatMap((graded) => Effect.flatMap(
+          artifacts.getArtifact(graded.artifactId),
+          (artifact) => reviewGradedAttempt(artifact, graded)
+        )),
+        Effect.tap((reviewed) => artifacts.saveAttempt(reviewed)),
         Effect.orDie
       ));
   })
