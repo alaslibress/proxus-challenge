@@ -90,6 +90,9 @@ pnpm --filter @proxus/server run agent:tutor "Crea un quiz corto de una pregunta
    - pide al tutor crear un quiz,
    - abre el artefacto en el workspace,
    - resuélvelo y revisa correcciones.
+   - tras corregir una respuesta corta, abre `packages/server/.data/sessions/<attemptId>.md`:
+     es la traza legible del panel de evaluación (qué dijo cada profe, el JSON del Juez y
+     la tabla de citas verificadas contra el PDF).
 6. Si necesitas más detalle sobre storage local, sigue [`docs/data.md`](./docs/data.md); no subas `.data`.
 7. Antes de entregar cambios, ejecuta [`docs/testing.md`](./docs/testing.md).
 
