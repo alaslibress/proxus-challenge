@@ -156,6 +156,23 @@ Registro de obstáculos encontrados durante la implementación, con síntoma, ca
 
 ---
 
+### Gemini 2.5 Flash exige `thoughtSignature` en partes `functionCall` del historial
+
+**Síntoma**: tras implementar PR-12.2, el segundo turno con tool calls devuelve HTTP 400 `INVALID_ARGUMENT`: *"Function call is missing a thought_signature in functionCall parts… function call `default_api:load_skill`, position 2."*
+
+**Causa**: Gemini 2.5 Flash es un modelo de pensamiento (*thinking model*). Cada parte `functionCall` en la respuesta incluye un campo `thoughtSignature` (base64). Cuando esa función aparece de nuevo en el historial de la siguiente petición, la API exige que la `thoughtSignature` original esté presente. PR-12.2 envía partes nativas `functionCall` en el historial, pero la signature se perdía: `session.ts` construía `AgentMessage.toolCall(name, params)` descartando el `id` que la contenía, y `renderPrompt` sintetizaba `call_0` sin ninguna signature.
+
+**Solución** (ebc3a69):
+1. Añadir `id?: string` a `ToolCallMessage` en `message.ts`.
+2. Pasar `toolCall.id` al construir el mensaje: `AgentMessage.toolCall(name, params, toolCall.id)`.
+3. En `renderPrompt`, usar `message.id ?? \`call_${callIndex}\`` como id de la parte estructurada.
+4. Exportar `encodeToolCallId` y `decodeThoughtSignature` en `gemini.ts` y usarlas en `toResponseParts` (encode) y `messageParts` (decode) respectivamente.
+5. El id viaja como `call_uuid||base64sig`: el `||` separa el uuid de la signature; `messageParts` lo decodifica y lo inyecta en el campo `thoughtSignature` de la parte `functionCall` enviada a Gemini.
+
+**Descartado**: eliminar las partes nativas y volver a texto (deshace la causa raíz de PR-12); parchear los tipos internos de Effect para añadir un campo `thoughtSignature` explícito (invasivo y frágil con el beta).
+
+---
+
 ### La corrección del PR-12 llegaba al alumno en vez de al modelo
 
 **Síntoma**: cuando se detectaba la fuga, `toResponseParts` devolvía un texto de corrección como parte del response. Ese texto se emitía como respuesta del asistente al alumno. El modelo nunca lo veía.
@@ -165,3 +182,46 @@ Registro de obstáculos encontrados durante la implementación, con síntoma, ca
 **Solución**: PR-12.1 extrae la lógica en `callGeminiOnce` y hace UN reintento interno dentro del adaptador cuando detecta un paso malformado. El mensaje correctivo va como turno extra en `contents` (invisible al historial del chat). Si el reintento recupera → devuelve la respuesta correcta. Si no → frase legible para el usuario.
 
 **Descartado**: hacer el reintento desde `session.ts` (consumiría un paso de `maxSteps` y sería visible en el historial).
+
+---
+
+## PR-13 — Borrar materiales, cerrar artefactos y renombrar
+
+### `Effect.orDie` tras `catchTag` convierte el error tipado en defecto (500)
+
+**Síntoma**: `DELETE /api/materials/no-existe` devolvía HTTP 500 en lugar del 404 tipado declarado en el schema del endpoint.
+
+**Causa**: la cadena `Effect.catchTag("MaterialNotFound", e => Effect.fail({...})).pipe(Effect.orDie)` parece correcta, pero `Effect.orDie` convierte **todos** los errores del canal en defectos — incluido el `Effect.fail` re-emitido por el propio `catchTag`. El `HttpApiBuilder` nunca ve el error tipado: ya llegó como defecto.
+
+**Solución**: sustituir `Effect.orDie` final por `Effect.catchTag("MaterialRepositoryError", e => Effect.die(e))`. Así solo los errores de infraestructura mueren; el error tipado `MaterialNotFound` permanece en el canal y el framework lo serializa como 404.
+
+**Descartado**: `Effect.catchTag("MaterialRepositoryError", Effect.orDie)` — `orDie` no es una función de un argumento válida para `catchTag`; hay que usar `e => Effect.die(e)`.
+
+---
+
+### `exactOptionalPropertyTypes` prohíbe pasar una prop opcional con valor `undefined`
+
+**Síntoma**: TS2375 al pasar `onClose={onClose}` a `ArtifactDetail` cuando `onClose` es `(() => void) | undefined`.
+
+**Causa**: con `exactOptionalPropertyTypes: true` (activo en `tsconfig.json`), el tipo de `{ onClose?: () => void }` NO incluye `undefined` como valor asignable a `onClose`: la prop puede **estar ausente** pero no puede estar **presente con valor `undefined`**. TypeScript los distingue.
+
+**Solución**: renderizar condicionalmente según el valor:
+```tsx
+onClose !== undefined
+  ? <ArtifactDetail onClose={onClose} ... />
+  : <ArtifactDetail ... />
+```
+
+**Descartado**: cambiar el tipo a `onClose?: (() => void) | undefined` (habría requerido marcar `exactOptionalPropertyTypes` como excepción y rompería la semántica de la flag).
+
+---
+
+### Rate limit de 20 peticiones/día (free tier) bloquea el QA del agente
+
+**Síntoma**: tras varios runs de debug y QA, el agente devuelve 429 `RESOURCE_EXHAUSTED`: *"Quota exceeded for metric: generativelanguage.googleapis.com/generate_content_free_tier_requests, limit: 20, model: gemini-3.6-flash"*.
+
+**Causa**: el tier gratuito de Gemini impone 20 peticiones por día por proyecto por modelo. Una conversación de agente con 3 pasos usa 3 peticiones; 5 runs de QA = ~15; los runs de debug anteriores habían agotado el resto.
+
+**Solución**: esperar al reseteo diario (medianoche UTC). No hay solución técnica sin cambiar de plan. El QA del agente (PR-12.2 + thoughtSignature) se ejecuta al día siguiente.
+
+**Descartado**: cambiar el modelo mid-session para usar el cupo de otro modelo (cambia el comportamiento y no es QA del cambio implementado).
