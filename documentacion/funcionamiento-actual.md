@@ -27,7 +27,7 @@ Effect v4 **beta**, `4.0.0-beta.83` pineado exacto en los cuatro paquetes, sin r
 `rewriteRelativeImportExtensions`. Esto último obliga a que **todo import relativo lleve
 la extensión `.ts`/`.tsx`**; se cumple al 100% en el código existente.
 
-No hay test runner. No hay eslint ni biome. El gate es `pnpm run typecheck`.
+**Test runner** (PR-13 / sesión 8-sep-2026): se añadió `vitest@5` a `packages/server`. El script `pnpm --filter @proxus/server run test` ejecuta 22 tests unitarios (3 suites: `message.ts`, `session.ts` funciones puras, `gemini.ts` encode/decode de thoughtSignature). El gate sigue siendo `pnpm run typecheck`; los tests son la segunda capa.
 
 ---
 
@@ -108,10 +108,13 @@ invocadas, el número de tool results y los primeros 200 caracteres del texto de
 Los dos tool handlers tienen timeout de 30 s (`harness.ts`): si se agota, el handler
 devuelve un mensaje de texto al modelo en lugar de dejar el turno colgado.
 
-El historial de tool calls se serializa en prosa por `renderMessage` (`session.ts:167-171`)
-y se traduce de vuelta a partes nativas `functionCall`/`functionResponse` en
-`promptContents` (`gemini.ts`) antes de enviarlo a la API. Esto evita el envenenamiento
-few-shot que causó el bug PR-12. Ver `documentacion/post-mortem-01-fuga-tool-calls.md`.
+**PR-12.2 (fix/tool-calls-estructural)**: `renderMessage` ya no existe. Las tool calls viajan como partes estructuradas a través de todo el pipeline:
+
+- `renderPrompt` emite `{ role: "assistant", content: [{ type: "tool-call", id, name, params }] }` y `{ role: "tool", content: [{ type: "tool-result", id, name, isFailure, result }] }` (tipos `Prompt.ToolCallPartEncoded` / `Prompt.ToolResultPartEncoded` de Effect v4 beta).
+- `messageParts` en `gemini.ts` los convierte directamente a `{ functionCall: { name, args } }` / `{ functionResponse: { name, response } }`. No hay regex de sincronización.
+- `ToolCallMessage` guarda el `id` del tool call (`id?: string`). El id codifica la `thoughtSignature` de Gemini como `call_uuid||base64sig` para que sobreviva el transporte opaco de Effect y pueda inyectarse de vuelta en el historial (requerido por Gemini 2.5 Flash / gemini-3.6-flash). Ver `dificultades.md §PR-12.2 — Gemini exige thoughtSignature`.
+
+La causa raíz del bug PR-12 está eliminada. La red de seguridad (`MALFORMED_FUNCTION_CALL` → reintento con `mode:ANY`) sigue activa.
 
 Si el modelo falla, no se propaga: `session.ts:89-93` lo convierte en un mensaje de
 asistente sintético ("I hit an internal model/tool-routing error…") y el stream termina
@@ -169,14 +172,17 @@ que produce un objeto nuevo.
 Se persiste en `.data/artifacts/attempts/<id>.json` desde
 `infra/artifacts/file-artifact-repository.ts:149-155`.
 
-Superficie HTTP: `GET /api/artifacts/`, `GET /api/artifacts/:id` y
-`POST /api/artifacts/:id/submit` (que encadena crear intento + corregir). **No hay
-endpoint de creación de artifacts ni de subida de materiales**: crear artifacts solo se
-puede desde el agente. El repositorio de dominio es bastante más rico que la API.
+Superficie HTTP:
+- `GET /api/materials/` — lista materiales
+- `GET /api/materials/:id` — obtiene un material
+- `DELETE /api/materials/:id` — borra el PDF del disco (**PR-13**). Devuelve 204 si existe, 404 tipado (`{"_tag":"MaterialNotFound","materialId":"..."}`) si no. La ruta se resuelve por listing del repositorio, no por concatenación directa del id: path traversal imposible.
+- `GET /api/artifacts/` — lista artifacts
+- `GET /api/artifacts/:id` — obtiene un artifact
+- `POST /api/artifacts/:id/submit` — encadena crear intento + corregir
 
-Todos los handlers terminan en `Effect.orDie` (`transport/http/handlers.ts`): los errores
-de dominio se convierten en defectos, o sea 500 sin canal de error tipado. Ningún
-endpoint declara `error:` en su schema.
+**No hay endpoint de creación de artifacts**: crear artifacts solo se puede desde el agente.
+
+Los handlers de materiales usan `Effect.catchTag("MaterialRepositoryError", e => Effect.die(e))` para errores de infraestructura y `Effect.fail({...})` para errores de dominio tipados (404). Los demás handlers terminan en `Effect.orDie`: 500 sin canal tipado.
 
 **Los artifacts no guardan de qué material salieron**: no hay `materialId` ni páginas de
 origen. Sin ese enlace, nada puede saber qué texto habría que citar para justificar
@@ -195,7 +201,7 @@ deuda conocida, fuera del alcance de PR-01.
 
 Adaptador escrito a mano, sin SDK: `fetch` contra
 `generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`
-(`domain/agents/gemini.ts:121-122`). Modelo por defecto `gemini-2.5-flash`,
+(`domain/agents/gemini.ts`). Modelo por defecto `gemini-3.6-flash` (**actualizado en sesión 8-sep-2026**; antes `gemini-2.5-flash`),
 configurable con `GEMINI_MODEL`. Sin `GOOGLE_GENERATIVE_AI_API_KEY` el server no arranca.
 
 El adaptador decodifica ahora `finishReason`, `usageMetadata` y `promptFeedback` de la
@@ -227,6 +233,12 @@ cuya tercera columna de 420px se la lleva el chat.
 (fondo `#FBFAFE`, texto `#14102A`). Fuentes: Geist y Geist Mono desde Google Fonts.
 El sidebar mide 252 px. Ningún componente usa clases de color literal de Tailwind;
 todo el color viene de tokens del design system. Ver `documentacion/design-system.md`.
+
+**PR-13 (fix/tool-calls-estructural, sesión 8-sep-2026)**:
+- **Nombre del producto**: `My Favorite Teacher` (pestaña del navegador, logo M, sidebar). Los paquetes siguen siendo `@proxus/*`.
+- **Borrado de materiales**: cada fila del sidebar tiene un botón `×` (siempre visible). El primer clic cambia a `Confirm`; el segundo borra. `Escape` o un clic fuera cancelan. La fila queda a `opacity-50` mientras la petición está en vuelo. Un error se muestra bajo la lista en `text-danger`.
+- **Cerrar artefacto**: `ArtifactWorkspace` tiene un botón `Close` en una cabecera *sticky*. `Escape` también cierra (excepto si el foco está en un `<input>` o `<textarea>`). Pulsar de nuevo el artefacto seleccionado en el sidebar lo cierra (toggle). La conversación del chat no se pierde.
+- `deleteMaterialAction` usa `apiRuntime.fn` con `reactivityKeys: ["materials"]` — el mismo patrón que `submitArtifactAttemptAction`.
 
 **El estado del chat no está en atoms**: son cuatro `useState` dentro de
 `Chat.tsx:18-24`. `domain/tutor/atoms.ts` contiene un único action que apunta al
