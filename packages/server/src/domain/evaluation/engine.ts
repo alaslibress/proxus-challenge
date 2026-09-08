@@ -1,6 +1,6 @@
 import { Context, Effect, Layer } from "effect";
 import { LanguageModel } from "effect/unstable/ai";
-import { FinalFeedbackSchema, type EnrichedFeedbackSchema } from "@proxus/shared";
+import { FinalFeedbackSchema, type AttemptEvaluationStage, type EnrichedFeedbackSchema } from "@proxus/shared";
 import { verifyCitations } from "../materials/citation.ts";
 import { EvaluationUnavailable, type EvaluationError } from "./errors.ts";
 import {
@@ -19,7 +19,8 @@ const TEACHER_TIMEOUT_MS = 20_000;
 
 export interface EvaluationEngineService {
   readonly evaluate: (
-    input: EvaluationInput
+    input: EvaluationInput,
+    emit?: (stage: AttemptEvaluationStage) => Effect.Effect<void>
   ) => Effect.Effect<EnrichedFeedbackSchema, EvaluationError, LanguageModel.LanguageModel>;
 }
 
@@ -39,9 +40,15 @@ const runTeacher = (systemPrompt: string, userPrompt: string) =>
   );
 
 const evaluate = (
-  input: EvaluationInput
+  input: EvaluationInput,
+  emit?: (stage: AttemptEvaluationStage) => Effect.Effect<void>
 ): Effect.Effect<EnrichedFeedbackSchema, EvaluationError, LanguageModel.LanguageModel> =>
   Effect.gen(function* () {
+    if (emit !== undefined) {
+      yield* emit("evaluating_good");
+      yield* emit("evaluating_bad");
+    }
+
     const [goodResult, badResult] = yield* Effect.all(
       [
         runTeacher(GOOD_TEACHER_SYSTEM_PROMPT, goodTeacherPrompt(input)),
@@ -52,6 +59,10 @@ const evaluate = (
 
     const good = goodResult._tag === "Success" ? goodResult.success.text : null;
     const bad = badResult._tag === "Success" ? badResult.success.text : null;
+
+    if (emit !== undefined) {
+      yield* emit("deliberating");
+    }
 
     const judgeResult = yield* LanguageModel.generateObject({
       prompt: [

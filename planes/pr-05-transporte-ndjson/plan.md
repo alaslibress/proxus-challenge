@@ -5,11 +5,11 @@
 - **Conflicto conocido**: toca `domain/evaluation/engine.ts` y `review.ts`, los mismos
   ficheros que el PR-06. **No se implementan en paralelo.**
 - **Bloquea a**: PR-07 (UI). El PR-06 puede ir en paralelo.
-- **Conflicto añadido (PR-10)**: el PR-10 (`fix/chat-input-lifecycle`) se implementa
-  antes que este PR y reescribe `Chat.tsx` y `domain/tutor/stream.ts`. **El Paso 6 de
-  este plan y la firma de `streamTutorMessage` descritos aquí ya no corresponden al
-  código.** El thinker actualizará este plan tras el merge del PR-10; hasta entonces el
-  doer no lo implementa.
+- **Conflicto añadido (PR-10), ya resuelto**: el PR-10 (`fix/chat-input-lifecycle`) se
+  implementa antes que este PR, reescribió `domain/tutor/stream.ts` y sacó todo el estado y
+  el bucle de eventos de `Chat.tsx` al hook `domain/tutor/use-tutor-chat.ts`. **El Paso 6
+  ya está reescrito sobre esa base** y `streamTutorMessage` ya acepta un `AbortSignal`
+  (`stream.ts:31-34`). El doer puede implementar el plan tal como está.
 - **Estado**: borrador
 - **Contiene LLM**: sí, indirectamente. No añade prompts.
 - **Origen**: [ADR-02 §1](../../documentacion/adr-02-evaluacion-transporte-observabilidad.md) y [ADR-01, Decisión 3](../../documentacion/adr-motor-evaluacion.md).
@@ -36,8 +36,12 @@ Además hay una fragilidad heredada en el transporte que ya existe:
   —un frame de un tipo que el cliente no conoce todavía— **revienta el generador y mata
   el stream entero**. Un despliegue en el que el servidor vaya por delante del cliente
   rompe el chat.
-- `Chat.tsx:42-61` solo hace `continue` con `"done"` y para todo lo demás lee
-  `event.message` a ciegas. Un frame nuevo lo rompe aunque el parser sobreviva.
+- El consumidor del stream en el cliente solo hace `continue` con `"done"` y para todo lo
+  demás lee `event.message` a ciegas. Un frame nuevo lo rompe aunque el parser sobreviva.
+  **Tras el PR-10 ese bucle ya no está en `Chat.tsx`**: vive en el hook
+  `packages/web/src/domain/tutor/use-tutor-chat.ts:56-75` (`if (event.type === "done") continue;`
+  en `:60`, `const message = event.message;` en `:62`). `Chat.tsx` quedó como presentación
+  pura: su única línea de lógica es `const chat = useTutorChat();` (`Chat.tsx:13`).
 - En el servidor, un fallo a mitad de stream **corta la conexión sin frame terminal**
   (`harness/session.ts:51-59`): la respuesta ya salió con 200 y las cabeceras ya se
   enviaron, así que el cliente se queda esperando un `done` que no llega.
@@ -49,9 +53,12 @@ transporte NDJSON deje de romperse por un frame desconocido o por un fallo a mit
 
 ## Fuera de alcance
 
-- La UI. Este PR deja el stream consumible y **no toca ni un componente**, salvo el
-  mínimo imprescindible en `Chat.tsx` para que no explote (Paso 6). Los estados visuales
-  y el render de citas son PR-07.
+- La UI. Este PR deja el stream consumible y **no toca ni un componente**: `Chat.tsx` no se
+  edita en absoluto. Lo mínimo imprescindible para que el chat no explote se hace en el
+  hook `packages/web/src/domain/tutor/use-tutor-chat.ts` (Paso 6), que es donde el PR-10
+  dejó el bucle de eventos; la firma pública del hook (`TutorChatState`,
+  `use-tutor-chat.ts:11-24`) no cambia, así que `Chat.tsx` no se entera. Los estados
+  visuales y el render de citas son PR-07.
 - La trazabilidad en `.data/sessions/`. Eso es PR-06.
 - Los prompts, el motor y la lógica de corrección. No se toca nada del PR-04 salvo la
   firma que se indica en el Paso 2.
@@ -227,10 +234,79 @@ En `packages/server/src/transport/http/server.ts`, siguiendo el molde de
       `fetch` a `${apiClientConfig.apiUrl}/api/artifacts/${artifactId}/submit/stream`,
       cabeceras `content-type: application/json` y `accept: application/x-ndjson`, y
       `readNdjson` con el decodificador de `AttemptStreamEvent`.
-- [ ] En `Chat.tsx`, cambiar el `switch` del bucle (`:42-61`) para que **ignore cualquier
-      frame cuyo `type` no sea `"message"`**, en vez de leer `event.message` a ciegas para
-      todo lo que no sea `"done"`. Es un cambio de tres líneas y es la otra mitad de la
-      resiliencia. **No se toca nada más de la UI en este PR.**
+#### Endurecer el consumo de eventos: en el hook, no en `Chat.tsx`
+
+**Esta parte del plan está reescrita tras el PR-10.** El texto original mandaba tocar el
+`switch` de `Chat.tsx:42-61`. Ese código ya no existe: `Chat.tsx` es hoy presentación pura
+—su única línea de lógica es `const chat = useTutorChat();` (`Chat.tsx:13`) y todo lo demás
+son `chat.messages`, `chat.status`, `chat.submit`, `chat.stop`— y el bucle de eventos vive
+en `packages/web/src/domain/tutor/use-tutor-chat.ts:56-75`. **El endurecimiento va ahí.**
+
+Estado que mantiene el hook y que hay que dejar coherente en cada caso (`use-tutor-chat.ts:27-31`
+y `:121-133`): `messages`, `input`, `status` (`"idle" | "sending"`), `error`, `stopped` y
+`canRetry`, que es derivado de `lastAttempt.current` (`:126`).
+
+- [ ] **Frame desconocido.** Hoy `:60-62` hace `if (event.type === "done") continue;` y
+      acto seguido `const message = event.message;` para **todo lo demás**. Un frame nuevo
+      —el servidor por delante del cliente— entra por ahí y mete un `undefined` en
+      `messages`. Invertir la condición: procesar **solo** `event.type === "message"` y
+      descartar en silencio cualquier otro `type`, sin tocar `messages`, `error` ni
+      `status`. Un `console.debug` con el frame ignorado es suficiente; no es un error de
+      usuario.
+      Hoy la unión solo tiene `"message"` y `"done"`
+      (`packages/shared/src/api/tutor.ts:19-28`), así que el cambio no altera el
+      comportamiento observable: es blindaje para el día en que la unión crezca.
+- [ ] **Línea con JSON malformado y línea partida entre chunks.** **El hook no hace nada.**
+      Ya están resueltas aguas abajo, en el lector del Paso 5: `lib/ndjson.ts:17-24`
+      envuelve el `decode` en `try/catch`, avisa con `console.warn` y sigue con la línea
+      siguiente; `:35-36` guarda la línea incompleta con `lines.pop()` y `:49-56` la vacía
+      en el flush final. **No añadir un segundo `try/catch` por evento dentro del `for await`**:
+      duplicaría la política de resiliencia en dos sitios y la haría divergir.
+- [ ] **Cierre del stream sin frame terminal.** Es el agujero real que queda. Si el
+      servidor corta después de las cabeceras (el caso descrito en el Problema,
+      `harness/session.ts:51-59`), el `for await` termina sin excepción, el hook cae en
+      `:77` (`lastAttempt.current = undefined`) y el `finally` deja `status: "idle"` sin
+      `error` y con `canRetry` en `false`: el turno se pierde **en silencio** y el usuario
+      no tiene ni mensaje ni botón de reintentar.
+      Llevar una bandera local en `run` —p. ej. `let sawDone = false`, puesta a `true` al
+      recibir el frame `"done"`— y al salir del bucle:
+      - `sawDone === true` → comportamiento actual: limpiar `lastAttempt.current`, sin
+        error.
+      - `sawDone === false` y **no** hubo aborto → turno incompleto: **conservar los
+        mensajes ya recibidos** (no revertir a `history`), poner un `error` del estilo
+        *"The tutor stopped responding before finishing. Try again."* y **no** limpiar
+        `lastAttempt.current`, para que `canRetry` siga en `true`.
+- [ ] **Aborto del usuario (Stop, PR-10).** No se toca: sale por el `catch` como
+      `AbortError` y `resolveStreamFailure` (`stream.ts:26-29`, apoyado en `isAbortError`
+      `:13-14`) ya devuelve `keepMessages: true`, sin error y sin retry, lo que el hook
+      traduce en `stopped: true` (`:80-86`). **La única condición nueva**: el caso "sin
+      frame terminal" del punto anterior **no debe dispararse tras un Stop**. Guardar la
+      comprobación con `controller.signal.aborted === false`, no con el estado de React,
+      que en ese punto todavía no se ha rendereado.
+- [ ] **Respuesta HTTP no-OK.** Tampoco se toca: `stream.ts:45-53` lanza antes de empezar a
+      leer, el `catch` del hook revierte a `history`, restaura el input y muestra el error
+      con `canRetry` en `true`. Es el camino correcto y ya funciona.
+
+> **No hay frame `error` en el chat del tutor.** El plan lo define solo para
+> `AttemptStreamEvent` (ver *Contratos afectados*), y la sección *Sin tocar
+> `TutorChatStreamEvent`* es explícita: este PR endurece el parser del chat, no su
+> contrato. Por tanto **no añadir un caso `"error"` al bucle de `use-tutor-chat.ts`**: sería
+> código muerto sobre un tipo que no existe y el compilador lo rechazaría. El frame `error`
+> se maneja en el consumidor del stream de intentos (`attempt-stream.ts`), y su UI es PR-07.
+
+- [ ] La firma pública del hook (`TutorChatState`, `use-tutor-chat.ts:11-24`) **no cambia**.
+      `Chat.tsx` **no se toca en este PR**: sigue leyendo `chat.error`, `chat.canRetry`
+      (`Chat.tsx:95-109`) y `chat.stopped` (`:88-92`), y el caso nuevo del turno incompleto
+      se pinta solo con el error y el botón Retry que ya están ahí.
+
+> **Otros puntos del plan que siguen apuntando a `Chat.tsx` por el mismo motivo y que
+> apuntaban a `Chat.tsx` por el mismo motivo — la cabecera (*Conflicto añadido (PR-10)*),
+> el tercer bullet de *Problema* y el primer bullet de *Fuera de alcance* — **ya están
+> corregidos y apuntan al hook**. En el PR-07 se corrigieron
+> `planes/pr-07-ui-observabilidad/plan.md` *Fuera de alcance* (bullet del chat) y el Paso 3
+> (mecanismo de `useAtomRefresh`). La referencia del Paso 5 del PR-07 a `Chat.tsx` por el
+> `aria-live` **es legítima** —eso sí es presentación y sigue en `Chat.tsx:49`— y se ha
+> dejado, solo con el número de línea corregido.
 
 ### Paso 7 — Documentación
 
@@ -315,5 +391,18 @@ de comprobar el paso 1 del criterio de aceptación sin navegador.
 - **Tras el PR-10**: `stream.ts` pasa a aceptar un `AbortSignal` y `Chat.tsx` delega su
   estado en el hook `useTutorChat`. El Paso 6 debe reescribirse sobre esa base.
 
-_Sin cambios todavía. El thinker anota aquí cualquier corrección al plan que venga del
-doer, con fecha y motivo._
+- **Paso 6 reescrito.** El endurecimiento del manejo de eventos pasa de `Chat.tsx` a
+  `packages/web/src/domain/tutor/use-tutor-chat.ts:56-75`, que es donde el PR-10 dejó el
+  bucle del stream. Se detalla qué hacer con frame desconocido, línea malformada o partida
+  (ya cubiertas por `lib/ndjson.ts`), cierre sin frame terminal (caso nuevo: conservar
+  mensajes, error y `canRetry`) y aborto por Stop. Se anota que el chat **no** tiene frame
+  `error` en su unión (`packages/shared/src/api/tutor.ts:19-28`) y que otros puntos del
+  plan y del PR-07 seguían citando `Chat.tsx`, pendientes de decisión del usuario.
+
+- **Corregidas las referencias obsoletas a `Chat.tsx` en el resto del plan** (aprobado por
+  el usuario): cabecera *Conflicto añadido (PR-10)*, tercer bullet de *Problema* y primer
+  bullet de *Fuera de alcance*. Los tres apuntan ya a `domain/tutor/use-tutor-chat.ts`. Con
+  eso el Paso 6 deja de contradecir al resto del documento y **se levanta el bloqueo al
+  doer**: el plan es implementable tal como está.
+
+_El thinker anota aquí cualquier corrección al plan que venga del doer, con fecha y motivo._

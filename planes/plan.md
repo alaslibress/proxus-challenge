@@ -267,8 +267,9 @@ Verificados en el código. Están desarrollados en
 4. **`streamText` es `Stream.empty`**: no hay streaming de tokens. Solo eventos de
    mensaje completo. La UI muestra fases discretas, no texto token a token.
 5. **El estado del chat no está en atoms**, está en `useState` dentro de `Chat.tsx`.
-6. **El cliente NDJSON decodifica en estricto** y explota con un frame desconocido:
-   cualquier cambio de protocolo mueve server y web en el mismo PR.
+6. ~~El cliente NDJSON decodifica en estricto~~ **Eliminado desde PR-05**: `readNdjson`
+   (`packages/web/src/lib/ndjson.ts`) envuelve cada línea en `try/catch` y salta la que no
+   decodifica con un `console.warn`, en vez de reventar el generador entero.
 7. **Los artifacts no guardan su material de origen.** Hay que añadir ese enlace para
    poder citar.
 8. **No existe `packages/server/.data/`** en un checkout limpio: hay que colocar un PDF
