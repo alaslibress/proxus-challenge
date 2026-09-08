@@ -93,10 +93,12 @@ escrito para dejar el repo compilando.
 
 ## 3. El roadmap, que ya está cerrado
 
-**Los 17 planes de `planes/` están implementados y mergeados.** El último fue el PR-08
-(`cc9f989`, rama `feat/evals-entrega`, PR #7). No queda ninguno pendiente, así que esta
-tabla ya no es una cola de trabajo: es el **registro del orden real en que se hicieron**,
-y sirve para dos cosas.
+**Los 16 planes de `planes/` están implementados.** Los 15 primeros están mergeados en
+`main`; el último es el PR-08, que aterrizó en `cc9f989` y vive en la rama
+`feat/evals-entrega` —con el PR #7 todavía abierto—, sobre la que después han seguido
+entrando commits de documentación. No queda ninguno pendiente, así que esta tabla ya no es
+una cola de trabajo: es el **registro del orden real en que se hicieron**, y sirve para dos
+cosas.
 
 1. **Arqueología.** Cuando el código te sorprenda, el plan del PR que lo introdujo explica
    el porqué mejor que cualquier comentario.
@@ -107,10 +109,6 @@ El orden no fue el numérico: los PRs 1.5, 09, 10, 11, 12, 12.1, 12.2 y 13 se co
 el 01 y el 02 porque se añadieron después de escribir el roadmap. El 1.5 fue el primero de
 ese bloque porque fija el sistema visual que los demás usan. PR-04, PR-05 y PR-06 se
 encadenan sobre la firma de `evaluate`.
-
-**`planes/plan.md` §6 sigue marcando el PR-08 como `en curso`** (`plan.md:117`). Es deriva
-del propio plan, no una tarea abierta: el PR-08 está implementado y mergeado. No lo
-"termines"; si acaso, dile al thinker que corrija el estado.
 
 | # | Rama | En una línea |
 |---|------|--------------|
@@ -442,7 +440,10 @@ existe. Lo corregido:
   recorte *"si el martes aprieta"*, que nunca se ejecutó (PR-06, PR-07 y PR-08 entraron
   enteros) y que hoy se leería como permiso para recortar trabajo nuevo. Se anotó que
   `plan.md:117` aún marcaba el PR-08 `en curso`; corregido después (ver la entrada
-  siguiente).
+  siguiente), y esa advertencia se ha retirado del §3 al quedarse sin objeto. El recuento
+  de planes decía *17*; son **16**, tantos como directorios en `planes/` y filas en la
+  tabla. Y decía que los 16 estaban *mergeados*: quince lo están, el PR-08 sigue con su PR
+  #7 abierto, que es justo lo que dice `plan.md:117`.
 - **§4** — se aclara que la rutina aplica al trabajo nuevo y que todo encargo pasa antes
   por un plan del thinker (plantilla en `plan.md:213-253`).
 - **§5, estilos** — afirmaba que `packages/web/src/styles.generated.css` es un fichero

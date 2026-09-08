@@ -8,6 +8,7 @@ import { FileEvaluationTrace } from "../../infra/evaluation/file-evaluation-trac
 import { MaterialRepository } from "../materials/material.ts";
 import { EvaluationTrace } from "./trace.ts";
 import { EvaluationEngineService, EvaluationEngineServiceLive } from "./engine.ts";
+import { panelRaisesScore } from "./review.ts";
 import {
   goodTeacherPrompt,
   badTeacherPrompt,
@@ -73,13 +74,17 @@ const program = Effect.gen(function* () {
   yield* Console.log("\n=== Juez (JSON final) ===");
   yield* Console.log(JSON.stringify(result.feedback, null, 2));
 
+  // Misma regla que aplica el motor (`panelRaisesScore` en review.ts): un veredicto
+  // "correcto" sin cita verificada NO sube la nota, y la traza debe decir lo mismo.
+  const overridden = panelRaisesScore(result.feedback);
+
   yield* trace.record({
     ...result.trace,
     attemptId: `panel-check-${Date.now()}`,
     artifactId: "panel-check",
     deterministicScore: 0,
-    finalScore: result.feedback.is_correct ? 1 : 0,
-    scoreOverridden: result.feedback.is_correct
+    finalScore: overridden ? 1 : 0,
+    scoreOverridden: overridden
   });
 
   return result.feedback;

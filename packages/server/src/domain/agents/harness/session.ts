@@ -76,7 +76,6 @@ function execute(
 
     yield* appendMessage(AgentMessage.user(input.input));
 
-    let lastToolResult = "";
     const maxSteps = input.maxSteps ?? 8;
 
     for (let step = 0; step < maxSteps; step++) {
@@ -110,31 +109,32 @@ function execute(
         yield* appendMessage(AgentMessage.toolResult(toolResult.name, toolResult.result, toolResult.isFailure));
       }
 
-        if (response.toolResults.length === 0) {
-        if (response.text.length === 0 && response.toolCalls.length === 0) {
-          // Adapter bailed (MALFORMED_FUNCTION_CALL, no recovery). Continue loop with
-          // synthetic user message so the model can answer with what it already knows.
-          // Not emitted to client — newMessages.push bypasses emit intentionally.
+      if (response.toolResults.length === 0) {
+        if (response.text.length === 0) {
+          // The turn produced neither text nor an executed tool: either the adapter bailed
+          // (MALFORMED_FUNCTION_CALL with no recovery) or the model returned an empty turn.
+          // Continue the loop with a synthetic user message so the model can answer with
+          // what it already knows. Not emitted to client — the push bypasses emit on purpose.
           newMessages.push(AgentMessage.user(
             "The tool call could not be completed. Answer the user now, in their language, using only what you already know from this conversation. Say plainly what you could not do."
           ));
           continue;
         }
-        const output = response.text.length > 0 ? response.text : lastToolResult;
-        yield* appendMessage(AgentMessage.assistant(output));
+
+        yield* appendMessage(AgentMessage.assistant(response.text));
         return {
-          output,
+          output: response.text,
           newMessages,
           messages: allMessages()
         };
       }
-
-      lastToolResult = String(response.toolResults.at(-1)?.result ?? lastToolResult);
     }
 
-    const output = lastToolResult.length > 0
-      ? lastToolResult
-      : "Agent stopped after reaching the maximum number of steps.";
+    // Step budget exhausted mid-work. A tool result is internal plumbing — a page dump, a
+    // JSON blob — never an answer, so it must not be echoed to the student. Spend one last
+    // turn with the tools switched off to force the model to write a real answer from what
+    // it already gathered.
+    const output = yield* wrapUp(harness, toolkit, allMessages());
     yield* appendMessage(AgentMessage.assistant(output));
 
     return {
@@ -144,6 +144,45 @@ function execute(
     };
   });
 }
+
+const wrapUpInstruction =
+  "You have run out of tool steps for this turn. Do not call any more tools. Answer the user now, in their language, using what you already gathered in this conversation. Never paste raw tool output back to the user: explain it in your own words. If you could not finish what they asked, say so plainly and tell them what to ask next.";
+
+const wrapUpFallback =
+  "I ran out of steps for this turn before I could finish. Ask me again and I will pick it up from here.";
+
+// `yield* harness.toolkit` resolves the toolkit to its handler-bound form, which is what
+// LanguageModel.generateText takes — not the AgentToolkit describing it.
+type ResolvedToolkit = Effect.Success<AgentToolkit>;
+
+const wrapUp = (
+  harness: AgentHarness,
+  toolkit: ResolvedToolkit,
+  messages: readonly AgentMessageType[]
+): Effect.Effect<string, never, LanguageModel.LanguageModel | Tool.HandlersFor<AgentToolkit["tools"]>> =>
+  Effect.gen(function* () {
+    yield* Effect.log("agent.wrap_up").pipe(
+      Effect.annotateLogs({ messageCount: messages.length })
+    );
+
+    const prompt = renderPrompt(
+      harness.systemPrompt,
+      [...messages, AgentMessage.user(wrapUpInstruction)]
+    );
+
+    const response = yield* LanguageModel.generateText({
+      prompt,
+      toolkit,
+      toolChoice: "none" as const
+    }).pipe(
+      Effect.matchEffect({
+        onFailure: (error) => Effect.succeed(modelErrorResponse(error)),
+        onSuccess: (response) => Effect.succeed(response)
+      })
+    );
+
+    return response.text.length > 0 ? response.text : wrapUpFallback;
+  });
 
 const modelErrorResponse = (error: unknown): LanguageModel.GenerateTextResponse<AgentToolkit["tools"]> =>
   new LanguageModel.GenerateTextResponse([

@@ -65,7 +65,7 @@ Chat.tsx ──fetch POST /api/tutor/chat/stream──► server.ts (HttpRouter 
   lo usa para el chat; el consumidor del streaming de intentos (Paso 6 de PR-05) queda
   pendiente porque ese paso quedó desactualizado tras el PR-10 y requiere que el thinker
   lo reescriba primero.
-- **`AbortSignal` (PR-10)**: el cliente cancela la petición con `AbortController`. **El servidor sí cancela**, verificado midiendo: al cortar el cliente a los 7 s, el `http.span` cierra en ese instante, la llamada a Gemini en vuelo se queda sin respuesta y no se registra un `agent.step` más — igual por la ruta directa que a través del proxy de Vite. La cadena es `NodeHttpServer.ts:195-197` (interrumpe el fiber al cerrarse la conexión) → `Stream.callback` en `harness/session.ts:51` (ata el bucle al scope del stream) → `gemini.ts:335-341` (pasa el `signal` al `fetch`). `Stop` conserva los mensajes ya recibidos y **no** repuebla el input: es una parada limpia, no un deshacer (ver §7).
+- **`AbortSignal` (PR-10)**: el cliente cancela la petición con `AbortController`. **El servidor sí cancela**, verificado midiendo: al cortar el cliente a los 7 s, el `http.span` cierra en ese instante, la llamada a Gemini en vuelo se queda sin respuesta y no se registra un `agent.step` más — igual por la ruta directa que a través del proxy de Vite. La cadena es `NodeHttpServer.ts:195-197` (interrumpe el fiber al cerrarse la conexión) → `Stream.callback` en `harness/session.ts:51` (ata el bucle al scope del stream) → `gemini.ts:356-362` (pasa el `signal` al `fetch`). `Stop` conserva los mensajes ya recibidos y **no** repuebla el input: es una parada limpia, no un deshacer (ver §7).
 
 ---
 
@@ -79,7 +79,7 @@ El modelo **no** ve el backend. Ve dos funciones (`domain/agents/harness/harness
 El system prompt (`harness.ts:52-62`) lista solo **nombres y descripciones de una línea**
 de las skills; el contenido se expande bajo demanda. Las skills son texto, no tools.
 
-**PR-11 (perf/agente-cortocircuito)**: el prompt del tutor se construye **por petición**, no una vez al levantar el layer. Cada llamada a `sendMessage`/`streamMessage` invoca `materialRepository.list()` y construye una sección `## Uploaded materials` con id, título y páginas de cada PDF. Si `list()` falla, el prompt indica que no hay materiales (el chat no cae). El prompt incluye reglas explícitas: responder directamente sin tool call cuando la pregunta es de conocimiento general, saludo, o la información ya está en la conversación; llamar a `materials view` solo con ids del inventario; **nunca** llamar a `materials list`. Esto elimina los dos round-trips innecesarios previos (load_skill + materials list) para preguntas directas. `maxSteps` bajó de 8 a 4 en el tutor (suficiente para `load_skill` + `artifacts create` + respuesta + margen).
+**PR-11 (perf/agente-cortocircuito)**: el prompt del tutor se construye **por petición**, no una vez al levantar el layer. Cada llamada a `sendMessage`/`streamMessage` invoca `materialRepository.list()` y construye una sección `## Uploaded materials` con id, título y páginas de cada PDF. Si `list()` falla, el prompt indica que no hay materiales (el chat no cae). El prompt incluye reglas explícitas: responder directamente sin tool call cuando la pregunta es de conocimiento general, saludo, o la información ya está en la conversación; llamar a `materials view` solo con ids del inventario; **nunca** llamar a `materials list`. Esto elimina los dos round-trips innecesarios previos (load_skill + materials list) para preguntas directas. `maxSteps` bajó de 8 a 4 en el tutor, con el argumento de que bastaba para `load_skill` + `artifacts create` + respuesta + margen. **Ese cálculo era falso y se revirtió en la QA de cierre**: un flujo con materiales gasta dos `load_skill`, uno o dos `materials text` y un `artifacts create` antes de escribir la primera línea, así que en 4 pasos no cabe. `maxSteps` vuelve a **8** en las dos puertas de entrada (`tutor-chat-service.ts:50`, `academic-tutor.ts:95`), que además se habían quedado descuadradas entre sí. El resto del PR-11 (prompt por petición, reglas de corto circuito) sigue en pie: era la parte que sí bajaba latencia.
 
 El CLI (`harness/cli.ts`, 389 líneas) es un parser propio con `--help`, subcomandos,
 tokenización con comillas y **argumentos posicionales por orden de clave** (no hay
@@ -99,17 +99,36 @@ artifacts grade <attemptId>
 ```
 
 **Añadir una capacidad = añadir un comando CLI o una skill, nunca una tool nueva.** El
-motivo es duro: `gemini.ts:124-154` mapea los esquemas JSON de parámetros por nombre de
+motivo es duro: `gemini.ts:154-184` mapea los esquemas JSON de parámetros por nombre de
 tool a mano, y el `default` es `{a: number, b: number}` (resto del agente de sumas de
 ejemplo). Una tool nueva se anunciaría a Gemini con un esquema falso.
 
-El bucle (`harness/session.ts:62-127`) es estrictamente secuencial, `maxSteps` por
+El bucle (`harness/session.ts:81-141`) es estrictamente secuencial, `maxSteps` por
 defecto 8, y **usa `generateText` incluso en la ruta de streaming**: lo que se emite son
 mensajes completos, no tokens. Termina cuando un paso no produce tool results.
 
+**Agotar el presupuesto no produce un volcado (arreglado en la QA de cierre).** El bucle
+guardaba el último tool result en una variable `lastToolResult` y lo devolvía como mensaje
+del asistente cuando se acababan los pasos: el alumno veía el texto crudo de la página del
+PDF —cabeceras `--- <materialId> page N ---` incluidas— firmado por el tutor. Hoy esa
+variable no existe. Al agotarse el presupuesto, `wrapUp` (`session.ts:158-185`) gasta **un
+turno más** con `toolChoice: "none"`, deja un log `agent.wrap_up` y devuelve el texto que
+escriba el modelo con lo que ya reunió; si ese turno falla, sale un mensaje explícito de
+que se quedó sin pasos, nunca el tool result. La misma limpieza cubre el turno vacío: un
+paso sin texto y sin tool results ejecutados inyecta un mensaje de usuario sintético
+—antes sólo se hacía si además no había tool calls— para que el modelo cierre con lo que
+sabe.
+
+Para que apagar las herramientas signifique algo hubo que arreglar el adaptador: omitir
+`toolConfig` deja a Gemini en `AUTO`, así que `toolChoiceConfig` (`gemini.ts:196-231`)
+manda ahora `{ mode: "NONE" }` explícito en vez de `undefined`.
+
+Cubierto por `domain/agents/harness/__tests__/session-step-budget.test.ts` (4 tests, con un
+`LanguageModel` falso que guioniza turnos que sólo llaman herramientas).
+
 Cada paso del bucle emite un log `agent.step` con el número de paso, las tool calls
 invocadas, el número de tool results y los primeros 200 caracteres del texto de respuesta
-(`session.ts:95-103`). Cada llamada a la API de Gemini emite un log `gemini.response` con
+(`session.ts:94-102`). Cada llamada a la API de Gemini emite un log `gemini.response` con
 `finishReason`, tokens usados y los primeros 200 caracteres del texto de respuesta
 (`gemini.ts`). Ningún log vuelca partes `file` (base64 de páginas de PDF).
 
@@ -124,14 +143,14 @@ devuelve un mensaje de texto al modelo en lugar de dejar el turno colgado.
 
 La causa raíz del bug PR-12 está eliminada. La red de seguridad (`MALFORMED_FUNCTION_CALL` → reintento con `mode:ANY`) sigue activa.
 
-Si el modelo falla, no se propaga: `session.ts:89-93` lo convierte en un mensaje de
+Si el modelo falla, no se propaga: `session.ts:87-92` lo convierte en un mensaje de
 asistente sintético ("I hit an internal model/tool-routing error…") y el stream termina
 normal. El HTTP ya devolvió 200 y las cabeceras ya se enviaron.
 
 `AgentMessage` está **declarado dos veces**: como schema en
 `packages/shared/src/schemas/agent-message.ts:3-36` y como interfaces a mano en
 `packages/server/src/domain/agents/harness/message.ts:1-28`. Además `renderMessage`
-(`session.ts:155-197`) es un `switch` exhaustivo sin `default` bajo
+(`session.ts:205-276`) es un `switch` exhaustivo sin `default` bajo
 `noFallthroughCasesInSwitch`. Añadir una variante toca tres sitios y rompe la
 compilación en el cuarto. **Los eventos nuevos deben ir en la unión de frames
 (`TutorChatStreamEvent`, discriminada por `type`), no en `AgentMessage`.**
@@ -148,7 +167,7 @@ devolviendo un data-URL base64, y extrae texto con
 `pdftotext -f N -l N -enc UTF-8 <path> -` (sin `-layout`, en orden de lectura).
 
 Ese PNG viaja al prompt como parte `file` gracias al único caso multimodal del harness
-(`session.ts:173-190`), que olfatea si un tool result es `MaterialPageImages`. El texto
+(`session.ts:224-240`), que olfatea si un tool result es `MaterialPageImages`. El texto
 viaja como tool result normal (`MaterialPageTexts`), sin necesitar ese caso multimodal.
 
 **Extracción de texto sin RAG.** `pdftotext` da texto literal por página, pero no hay
@@ -183,6 +202,22 @@ que produce un objeto nuevo.
 - El "feedback" es el campo `explanation` que escribió el autor de la pregunta.
 - Short-answer: igualdad exacta de strings tras `trim().toLowerCase()`
   (`correctQuestion`/`normalizeAnswer` en `artifact.ts`).
+
+**El schema de las preguntas es un contrato con el modelo, y hasta la QA de cierre no
+estaba escrito.** Ni la skill `create-study-artifacts` ni el `--help` de `artifacts create`
+documentaban `short-answer` (que vive **sólo** en un `test` y usa `expectedAnswer`, no
+`correctAnswer`) ni que `explanation` es obligatoria en `multiple-choice` y `true-false`.
+El modelo lo adivinaba, el decodificador lo rechazaba y el `SchemaError` acababa en la
+pantalla del alumno. Hoy el contrato está en los tres sitios donde el modelo mira —skill,
+`--help` y el mensaje de error de validación (`renderSerializationError` en
+`artifact-commands.ts`, que enumera los campos requeridos por tipo)— y `maxScore` de
+`short-answer` pasa a ser **opcional en el transporte con valor por defecto 1 al decodificar**
+(`Schema.withDecodingDefaultKey`, `packages/shared/src/schemas/artifact.ts:32-41`): todos
+los llamantes repetían la misma constante y las preguntas cerradas ya valen 1 punto fijo.
+Sigue siendo un número una vez decodificado, así que `gradeAttempt` no cambia. Cubierto por
+`domain/artifacts/__tests__/artifact-schema.test.ts` (5 tests), donde el último caso
+decodifica un `test` con los tres tipos escrito tal y como lo documenta la skill: si la
+documentación y el schema se separan, se pone rojo.
 
 **Desde PR-04, short-answer ya no se queda ahí.** `POST /api/artifacts/:id/submit`
 encadena, tras `gradeAttempt`, un `EvaluationEngineService`
@@ -363,13 +398,31 @@ Hay **dos niveles**, y sólo el segundo cuesta dinero.
 `vitest ^5.0.0` es devDependency de `packages/server` y de `packages/web`, cada uno con su
 `vitest.config.ts` (`environment: "node"`, `include: ["src/**/*.test.ts"]`) y sus scripts
 `test` / `test:watch`. Desde la raíz: `pnpm run test` (alias de `pnpm -r test`). Hoy son
-**15 ficheros y 137 tests**, todos deterministas y sin ninguna llamada de red.
+**17 ficheros y 151 tests**, todos deterministas y sin ninguna llamada de red.
 
 El modelo falso vive aquí: `domain/evaluation/__tests__/engine.test.ts:16-51`
 (`makeFakeLanguageModel`, con `generateText`, `generateObject`, `streamText` y fallos
 guionizados por rol), y el `MaterialRepository` de fixtures en `review.test.ts:29-53`.
 Cubren el motor de evaluación, la verificación de citas, la traza, el purgado de schemas
 para Gemini, el lector NDJSON del navegador y el stream de evaluación.
+
+Los tres bloques añadidos en la QA de cierre:
+
+- `domain/agents/harness/__tests__/session-step-budget.test.ts` (**4 tests**, fichero
+  nuevo): agota el presupuesto de pasos con un `LanguageModel` falso y comprueba que no
+  sale el volcado de página, que se gasta exactamente un turno extra con
+  `toolChoice: "none"`, que el fallo de ese turno degrada a un mensaje honesto y que un
+  turno que cabe en el presupuesto no paga ese coste.
+- `domain/artifacts/__tests__/artifact-schema.test.ts` (**5 tests**, fichero nuevo):
+  decodifica contra los schemas de `@proxus/shared` el `maxScore` por defecto, el `test`
+  con `short-answer` sin `maxScore`, el rechazo de una pregunta cerrada sin `explanation` y
+  el `test` con los tres tipos tal y como los documenta la skill.
+- `domain/evaluation/__tests__/review.test.ts` gana un `describe("panelRaisesScore")` con
+  **5 casos**. La regla que sube la nota se extrajo a `panelRaisesScore`
+  (`review.ts:72-76`) y se exporta precisamente para poder probarla directa y para que el
+  script de demo `panel:check` informe lo mismo que aplica el motor: antes anunciaba
+  `scoreOverridden: is_correct` a secas, es decir, subidas de nota que el motor no aplica
+  porque falta la cita verificada.
 
 Lo que **no** miden: la calidad de los prompts. Garantizan que ante una respuesta X del
 Juez el sistema hace Y; para saber si el Juez es bueno hay que ir al nivel 2.
@@ -394,8 +447,29 @@ En el mismo nivel 2, y también con API key, hay dos scripts sueltos:
 sobre un PDF real e imprime las dos críticas y el JSON del Juez —es lo **único** que mide
 si los prompts son buenos—, y `domain/agents/structured-output.check.ts`
 (`structured-output:check`), que comprueba `generateObject` contra Gemini. Ninguno de los
-dos está automatizado; con una key de *free tier* chocan contra el límite diario
-(`429 RESOURCE_EXHAUSTED`, limit 20). Anotado en `docs/testing.md`.
+dos está automatizado.
+
+Los tres (eval, `panel:check` y `structured-output:check`) se ejecutaron contra
+`gemini-3.6-flash` el 8-sep-2026: la eval salió 3/3 casos y 9/9 criterios,
+`structured-output:check` devolvió JSON válido contra `FinalFeedbackSchema`, y
+`panel:check` corrió dos veces —una respuesta no sostenida por la página, `is_correct:
+false`, nota sin subir; y una anclada en el material, `is_correct: true` con una cita
+`verified: true` en la página 2 de `guiaMuestraDeDatos`, nota subida a 1—. Las dos trazas
+quedaron en `packages/server/.data/sessions/panel-check-1788895344615.md` y
+`panel-check-1788895812699.md`. Detalle en `docs/testing.md` y en el README §4.
+
+Dos límites operativos, no bugs: el *free tier* da **20 peticiones/día/modelo** y los tres
+scripts gastan ~19-20 entre todos, así que no caben dos rondas el mismo día; y
+`panel:check` repite las llamadas a los dos profes fuera del motor sólo para imprimirlas
+(`panel.check.ts:46-64`), gastando 5 llamadas donde bastarían 3 — el motor no expone las
+críticas intermedias, y ése es el arreglo de fondo. `panel:check` **no** está roto: provee
+`NodeServices.layer` en su propio wiring (`panel.check.ts:91-101`).
+
+Lo que sí era un bug del script: su traza calculaba `finalScore` y `scoreOverridden` a
+partir de `is_correct` a secas, así que **anunciaba subidas de nota que el motor nunca
+aplica** (la nota sólo sube si además hay una cita `verified`). Se corrigió importando la
+misma función que aplica el motor, `panelRaisesScore` (`review.ts:72-76`), en vez de
+reimplementar la regla: la demo y el motor no pueden volver a divergir.
 
 Los tres casos del dataset **no usan materiales**. Su repositorio falso **sí** tiene canal
 de texto: `extractText` lee `MaterialPageFixture.text` (`:289-303`). El disfraz PNG afecta

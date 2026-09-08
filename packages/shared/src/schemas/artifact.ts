@@ -1,4 +1,4 @@
-import { Schema } from "effect";
+import { Effect, Schema } from "effect";
 import { ArtifactSource } from "./citation.ts";
 import { EnrichedFeedbackSchema } from "./evaluation.ts";
 
@@ -34,7 +34,9 @@ export const ShortAnswerQuestion = Schema.Struct({
   id: Schema.String,
   prompt: Schema.String,
   expectedAnswer: Schema.String,
-  maxScore: Schema.Number,
+  // Optional on the wire, always a number once decoded: every caller was repeating
+  // the same constant, and closed questions are already worth a hard-coded 1 point.
+  maxScore: Schema.Number.pipe(Schema.withDecodingDefaultKey(Effect.succeed(1))),
   sourcePage: Schema.optional(Schema.Number)
 });
 export type ShortAnswerQuestion = typeof ShortAnswerQuestion.Type;
