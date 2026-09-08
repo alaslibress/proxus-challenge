@@ -1,7 +1,9 @@
-import { useAtomValue } from "@effect/atom-react";
+import { useAtomSet, useAtomValue } from "@effect/atom-react";
+import { useEffect, useRef, useState } from "react";
 import * as AsyncResult from "effect/unstable/reactivity/AsyncResult";
 import { artifactsQuery } from "../domain/artifacts/atoms.ts";
-import { materialsQuery } from "../domain/materials/atoms.ts";
+import { deleteMaterialAction, materialsQuery } from "../domain/materials/atoms.ts";
+import type { PdfMaterial } from "@proxus/shared";
 
 interface SidebarProps {
   readonly selectedArtifactId: string | null;
@@ -41,6 +43,150 @@ function Eyebrow({ children }: { children: React.ReactNode }) {
   );
 }
 
+function MaterialRow({ material }: { readonly material: PdfMaterial }) {
+  const [confirming, setConfirming] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+  const [error, setError] = useState<string | undefined>();
+  const timerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const rowRef = useRef<HTMLLIElement>(null);
+  const deleteMaterial = useAtomSet(deleteMaterialAction, { mode: "promise" });
+
+  const startConfirm = () => {
+    setConfirming(true);
+    timerRef.current = setTimeout(() => setConfirming(false), 5000);
+  };
+
+  const cancelConfirm = () => {
+    setConfirming(false);
+    clearTimeout(timerRef.current);
+  };
+
+  const handleDelete = async () => {
+    clearTimeout(timerRef.current);
+    setDeleting(true);
+    setError(undefined);
+    try {
+      await deleteMaterial(material.id);
+    } catch (cause) {
+      setDeleting(false);
+      setConfirming(false);
+      setError(cause instanceof Error ? cause.message : "Could not delete material.");
+    }
+  };
+
+  // Cancel confirmation when clicking outside the row
+  useEffect(() => {
+    if (!confirming) return;
+    const handler = (event: MouseEvent) => {
+      if (rowRef.current !== null && !rowRef.current.contains(event.target as Node)) {
+        cancelConfirm();
+      }
+    };
+    document.addEventListener("mousedown", handler);
+    return () => { document.removeEventListener("mousedown", handler); };
+  }, [confirming]);
+
+  // Cancel on Escape
+  useEffect(() => {
+    if (!confirming) return;
+    const handler = (event: KeyboardEvent) => {
+      if (event.key === "Escape") cancelConfirm();
+    };
+    document.addEventListener("keydown", handler);
+    return () => { document.removeEventListener("keydown", handler); };
+  }, [confirming]);
+
+  // Cleanup timer on unmount
+  useEffect(() => () => { clearTimeout(timerRef.current); }, []);
+
+  return (
+    <li
+      ref={rowRef}
+      className="flex flex-col gap-1"
+    >
+      <div
+        className={`flex items-center gap-2.5 rounded-[10px] ${deleting ? "opacity-50" : ""}`}
+        style={{ padding: "10px 8px", transition: "opacity 120ms" }}
+      >
+        {/* Badge PDF */}
+        <div
+          className="grid place-items-center rounded border border-line-strong bg-surface-muted text-ink-faint flex-shrink-0"
+          style={{
+            width: 22,
+            height: 26,
+            fontFamily: "var(--font-mono)",
+            fontSize: 8,
+            fontWeight: 500,
+          }}
+        >
+          PDF
+        </div>
+        {/* Nombre */}
+        <span
+          className="flex-1 min-w-0 truncate text-ink-mute"
+          style={{ fontSize: 13, fontWeight: 400 }}
+        >
+          {material.title}
+        </span>
+        {/* Meta */}
+        <span
+          className="text-ink-faint flex-shrink-0"
+          style={{ fontFamily: "var(--font-mono)", fontSize: 10.5 }}
+        >
+          {material.pageCount} p
+        </span>
+        {/* Botón borrar */}
+        {confirming
+          ? (
+              <button
+                type="button"
+                aria-label={`Confirm delete ${material.title}`}
+                disabled={deleting}
+                onClick={handleDelete}
+                className="flex-shrink-0 border border-danger-line bg-danger-tint text-danger-ink"
+                style={{
+                  borderRadius: 6,
+                  padding: "3px 8px",
+                  fontSize: 11,
+                  fontWeight: 600,
+                  minWidth: 24,
+                  minHeight: 24,
+                  cursor: deleting ? "not-allowed" : "pointer"
+                }}
+              >
+                Confirm
+              </button>
+            )
+          : (
+              <button
+                type="button"
+                aria-label={`Delete ${material.title}`}
+                disabled={deleting}
+                onClick={startConfirm}
+                className="flex-shrink-0 text-ink-faint hover:text-danger"
+                style={{
+                  borderRadius: 6,
+                  padding: "3px 6px",
+                  fontSize: 14,
+                  fontWeight: 400,
+                  minWidth: 24,
+                  minHeight: 24,
+                  cursor: deleting ? "not-allowed" : "pointer",
+                  transitionDuration: "120ms",
+                  transitionTimingFunction: "var(--ease-dc)"
+                }}
+              >
+                ×
+              </button>
+            )}
+      </div>
+      {error !== undefined && (
+        <p className="text-danger px-2" style={{ fontSize: 11 }}>{error}</p>
+      )}
+    </li>
+  );
+}
+
 export function Sidebar({ selectedArtifactId, onSelectArtifact }: SidebarProps) {
   const materials = useAtomValue(materialsQuery);
   const artifacts = useAtomValue(artifactsQuery);
@@ -62,14 +208,14 @@ export function Sidebar({ selectedArtifactId, onSelectArtifact }: SidebarProps) 
             background: "linear-gradient(145deg, #8B5CF2, #6B33DC)",
           }}
         >
-          P
+          M
         </div>
         <div>
           <strong
             className="block text-ink"
             style={{ fontSize: 14, fontWeight: 600, letterSpacing: "-.01em" }}
           >
-            Proxus Tutor
+            My Favorite Teacher
           </strong>
           <span className="block text-ink-faint" style={{ fontSize: 11.5, fontWeight: 400 }}>
             Academic assistant
@@ -98,39 +244,7 @@ export function Sidebar({ selectedArtifactId, onSelectArtifact }: SidebarProps) 
               : (
                   <ul className="flex flex-col gap-0.5">
                     {value.materials.map((material) => (
-                      <li
-                        key={material.id}
-                        className="flex items-center gap-2.5 cursor-default rounded-[10px]"
-                        style={{ padding: "10px 8px" }}
-                      >
-                        {/* Badge PDF */}
-                        <div
-                          className="grid place-items-center rounded border border-line-strong bg-surface-muted text-ink-faint flex-shrink-0"
-                          style={{
-                            width: 22,
-                            height: 26,
-                            fontFamily: "var(--font-mono)",
-                            fontSize: 8,
-                            fontWeight: 500,
-                          }}
-                        >
-                          PDF
-                        </div>
-                        {/* Nombre */}
-                        <span
-                          className="flex-1 min-w-0 truncate text-ink-mute"
-                          style={{ fontSize: 13, fontWeight: 400 }}
-                        >
-                          {material.title}
-                        </span>
-                        {/* Meta */}
-                        <span
-                          className="text-ink-faint flex-shrink-0"
-                          style={{ fontFamily: "var(--font-mono)", fontSize: 10.5 }}
-                        >
-                          {material.pageCount} p
-                        </span>
-                      </li>
+                      <MaterialRow key={material.id} material={material} />
                     ))}
                   </ul>
                 ),
@@ -174,6 +288,7 @@ export function Sidebar({ selectedArtifactId, onSelectArtifact }: SidebarProps) 
                               transitionTimingFunction: "var(--ease-dc)",
                             }}
                             type="button"
+                            aria-pressed={isSelected}
                             onClick={() => onSelectArtifact(artifact.id)}
                           >
                             {/* Badge de tipo */}

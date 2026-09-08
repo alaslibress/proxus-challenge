@@ -27,3 +27,8 @@ export const MaterialListResponse = Schema.Struct({
   materials: Schema.Array(PdfMaterial)
 });
 export type MaterialListResponse = typeof MaterialListResponse.Type;
+
+export const MaterialNotFoundError = Schema.TaggedStruct("MaterialNotFound", {
+  materialId: Schema.String
+});
+export type MaterialNotFoundError = typeof MaterialNotFoundError.Type;

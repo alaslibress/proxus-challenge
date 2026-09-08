@@ -29,7 +29,15 @@ export const MaterialsHttpHandlers = HttpApiBuilder.group(
         Effect.map((items) => ({ materials: items })),
         Effect.orDie
       ))
-      .handle("get", ({ params }) => materials.get(params.id).pipe(Effect.orDie));
+      .handle("get", ({ params }) => materials.get(params.id).pipe(Effect.orDie))
+      .handle("delete", ({ params }) =>
+        materials.delete(params.id).pipe(
+          Effect.catchTag("MaterialNotFound", (e) =>
+            Effect.fail({ _tag: "MaterialNotFound" as const, materialId: e.materialId })
+          ),
+          Effect.orDie
+        )
+      );
   })
 );
 

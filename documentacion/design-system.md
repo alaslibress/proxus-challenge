@@ -6,6 +6,8 @@ Todos los valores son extraídos de ese fichero. Las extensiones marcadas como *
 
 Aplicado en **PR-1.5** (`feat/sistema-visual`). Los PRs posteriores de UI consumen estos tokens; no inventan colores.
 
+**Nombre de producto**: *My Favorite Teacher* (PR-13). Los paquetes siguen llamándose `@proxus/*` (histórico, no se migra). Si el próximo agente encuentra "Proxus Tutor" en el código fuente es un bug; si lo encuentra en referencias al canvas de origen o en `planes/`, es correcto.
+
 ---
 
 ## Tokens de color
