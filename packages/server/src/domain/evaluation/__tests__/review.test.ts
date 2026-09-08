@@ -13,7 +13,7 @@ import { MaterialRepository, MaterialRepositoryError, type PageText } from "../.
 import { EvaluationEngineService } from "../engine.ts";
 import { EvaluationUnavailable } from "../errors.ts";
 import { EvaluationTrace, type EvaluationTraceEntry } from "../trace.ts";
-import { reviewGradedAttempt } from "../review.ts";
+import { panelRaisesScore, reviewGradedAttempt } from "../review.ts";
 
 const recordedTraces: EvaluationTraceEntry[] = [];
 
@@ -63,6 +63,9 @@ const makeFakeEngine = (
         readonly quote: string;
         readonly evidenceText: string;
       }
+    // Tercer modo (PR-08): el panel contesta sin citar nada. El modo "succeed" construye
+    // siempre exactamente una cita, así que citas_pdf: [] es inalcanzable sin esto.
+    | { readonly kind: "succeed-no-citations"; readonly is_correct: boolean }
 ) =>
   Layer.succeed(EvaluationEngineService)({
     evaluate: (input) => {
@@ -92,6 +95,22 @@ const makeFakeEngine = (
           })
         ) as unknown as ReturnType<EvaluationEngineService["evaluate"]>;
       }
+
+      if (behavior.kind === "succeed-no-citations") {
+        return Effect.succeed({
+          feedback: {
+            is_correct: behavior.is_correct,
+            feedback: "Feedback consolidado del panel.",
+            citas_pdf: []
+          },
+          trace: {
+            ...traceBase,
+            judge: { is_correct: behavior.is_correct, feedback: "Feedback consolidado del panel.", citas_pdf: [] },
+            citations: []
+          }
+        }) as unknown as ReturnType<EvaluationEngineService["evaluate"]>;
+      }
+
       const verified = input.evidence.some((page) => page.text.includes(behavior.quote));
       const citas_pdf = [
         {
@@ -243,6 +262,25 @@ describe("reviewGradedAttempt", () => {
     expect(correction.score).toBe(baseCorrection.score);
   });
 
+  it("does NOT raise the grade when the panel says is_correct but cites nothing at all (citas_pdf: [])", async () => {
+    const pageText = "La fotosíntesis convierte luz solar en energía química de forma continua.";
+    const layers = Layer.mergeAll(
+      fakeTrace,
+      makeFakeEngine({ kind: "succeed-no-citations", is_correct: true }),
+      makeFakeMaterialRepository({ pages: [{ page: 1, text: pageText }] }),
+      noLanguageModelNeeded
+    );
+
+    const result = (await run(testArtifact, gradedAttempt, layers)) as GradedTestAttempt;
+    const correction = result.corrections[0] as ShortAnswerCorrection;
+
+    // Sin ninguna cita verificada la nota se queda en la determinista, aunque el Juez
+    // diga que la respuesta es correcta (Tech Spec §5, exigencia nº2).
+    expect(correction.score).toBe(baseCorrection.score);
+    expect(correction.feedback).toBe(baseCorrection.feedback);
+    expect(correction.review?.citas_pdf).toEqual([]);
+  });
+
   it("passes through unchanged when the attempt is still ungraded", async () => {
     const ungraded: ArtifactAttempt = {
       artifactKind: "test",
@@ -316,5 +354,54 @@ describe("reviewGradedAttempt", () => {
     const result = (await run(testArtifact, gradedAttempt, layers)) as GradedTestAttempt;
 
     expect(result.corrections[0]).toEqual(baseCorrection);
+  });
+});
+
+// Regla compartida por el motor y por el script de demo `panel.check.ts`. Se prueba
+// directamente porque el script es un ejecutable con argv y no se puede invocar aquí:
+// si esta regla se relajara, la traza de la demo anunciaría subidas de nota que el
+// motor nunca aplicaría.
+describe("panelRaisesScore", () => {
+  const citation = (verified: boolean) => ({
+    materialId: "mat-1",
+    page: verified ? 1 : 0,
+    quote: "la fotosíntesis convierte luz solar",
+    verified
+  });
+
+  it("raises the score only when the judge says correct AND a citation is verified", () => {
+    expect(panelRaisesScore({
+      is_correct: true,
+      feedback: "Correcta.",
+      citas_pdf: [citation(true)]
+    })).toBe(true);
+  });
+
+  it("does NOT raise the score when the judge says correct but no citation is verified", () => {
+    expect(panelRaisesScore({
+      is_correct: true,
+      feedback: "Correcta según el juez, pero la cita es inventada.",
+      citas_pdf: [citation(false)]
+    })).toBe(false);
+  });
+
+  it("does NOT raise the score when the judge says correct but cites nothing", () => {
+    expect(panelRaisesScore({
+      is_correct: true,
+      feedback: "Correcta sin citas.",
+      citas_pdf: []
+    })).toBe(false);
+  });
+
+  it("does NOT raise the score when the judge says incorrect, even with a verified citation", () => {
+    expect(panelRaisesScore({
+      is_correct: false,
+      feedback: "Incompleta.",
+      citas_pdf: [citation(true)]
+    })).toBe(false);
+  });
+
+  it("does NOT raise the score when the panel produced no review at all", () => {
+    expect(panelRaisesScore(undefined)).toBe(false);
   });
 });

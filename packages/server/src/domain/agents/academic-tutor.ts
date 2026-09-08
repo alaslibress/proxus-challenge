@@ -91,7 +91,8 @@ export const academicTutorAgent = Effect.gen(function* () {
   const messages = yield* session.stream({
     input: task,
     messages: storedSession.messages,
-    maxSteps: 4
+    // Same budget as TutorChatServiceLive: 4 does not fit a materials-backed flow.
+    maxSteps: 8
   }).pipe(
     Stream.provide(harness.layer),
     Stream.tap((message) => Effect.gen(function* () {

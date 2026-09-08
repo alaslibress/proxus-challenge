@@ -227,8 +227,13 @@ HTTP es un fallo, y sin tests hay que verificarlo a mano.
 ## Criterio de aceptación
 
 1. `grep -c "Schema.Struct" packages/server/src/domain/artifacts/artifact.ts` devuelve `0`.
-2. `packages/shared/src/schemas/artifact.ts` declara los 34 schemas (29 + los 5 subidos)
-   y nadie más los declara.
+2. `packages/shared/src/schemas/artifact.ts` es el único sitio donde se declaran: los 29
+   deduplicados, los 5 que suben del server y los 2 que ya sólo vivían en shared
+   (`ArtifactSummary`, `ArtifactListResponse`). Uno de los 29, `ArtifactKind`, es un alias
+   de tipo derivado de `Artifact`, no una declaración propia, así que el recuento de
+   declaraciones queda en **35**:
+   `grep -c '^export const ' packages/shared/src/schemas/artifact.ts` → `35`. Es el número
+   que hay que comprobar, no memorizar: crecerá con cualquier PR que añada un contrato.
 3. `pnpm run typecheck` en verde en los cuatro paquetes.
 4. `pnpm --filter @proxus/web run build` en verde.
 5. Las respuestas de `GET /api/artifacts/`, `GET /api/artifacts/:id` y
@@ -280,7 +285,30 @@ guardados siguen decodificando.
   hueco de dos días. Se hace igual porque los tres PRs siguientes escriben sobre estos
   ficheros, y pagar el refactor después significaría hacerlo tres veces mal y una bien.
 
+## Hallazgo de la fase — el PR-1.5
+
+> **Nota añadida a posteriori (2026-09-08).** No forma parte del plan original ni cambia
+> nada de lo de arriba: se anota aquí porque es el sitio donde un lector futuro lo va a
+> buscar.
+
+Con este PR ya mergeado (`946f894`) y antes de arrancar la fase 2 del roadmap
+([`tech-spec.md §6`](../../documentacion/tech-spec.md)) apareció un problema que el
+roadmap no contemplaba: **no había sistema visual**. Cada componente pintaba con clases
+literales de Tailwind (`bg-slate-900`, `border-sky-400`, `bg-blue-600`), así que todo PR
+posterior que tocase UI —PR-09, PR-10, PR-07— habría nacido con colores que después
+tocaría repintar uno a uno.
+
+La respuesta fue [`../pr-1.5-sistema-visual/plan.md`](../pr-1.5-sistema-visual/plan.md):
+capa de tokens `@theme`, fuentes Geist, tema claro, repintado de los cuatro componentes y
+[`documentacion/design-system.md`](../../documentacion/design-system.md) como norma para
+todo lo que venga detrás.
+
+**Por eso lleva número fraccionario.** No es un PR más al final de la lista: es un hallazgo
+de esta primera fase, resuelto dentro de ella e inmediatamente detrás de este PR-01, antes
+que ningún otro. El orden real de ejecución empieza así: **PR-01 → PR-1.5 → …**
+
 ## Historial
 
-_Sin cambios todavía. El thinker anota aquí cualquier corrección al plan que venga del
-doer, con fecha y motivo._
+- **2026-09-08** — Se añade la sección *Hallazgo de la fase — el PR-1.5*, que documenta por
+  qué el sistema visual salió de esta fase y por qué su plan tiene numeración fraccionaria.
+  No se toca ninguna decisión ni ningún paso del plan original.

@@ -5,6 +5,7 @@ import type {
   ArtifactAttempt,
   AttemptEvaluationStage,
   AttemptStreamEvent,
+  EnrichedFeedbackSchema,
   QuestionCorrection,
   ShortAnswerCorrection,
   TestQuestion
@@ -64,6 +65,14 @@ const noEvidenceTraceEntry = (params: {
   scoreOverridden: false,
   durationMs: 0
 });
+
+/** La única regla que puede subir una nota: el Juez la da por correcta Y al menos una de
+ * sus citas quedó verificada contra el texto real del PDF. Vive aquí y se exporta para que
+ * el script de demo (`panel.check.ts`) informe exactamente lo mismo que aplica el motor. */
+export const panelRaisesScore = (review: EnrichedFeedbackSchema | undefined): boolean =>
+  review !== undefined
+    && review.is_correct
+    && review.citas_pdf.some((citation) => citation.verified);
 
 const reviewCorrection = (
   artifact: Artifact,
@@ -152,9 +161,7 @@ const reviewCorrection = (
   );
 
   const deterministicScore = correction.score;
-  const hasVerifiedCitation = outcome.review !== undefined
-    && outcome.review.citas_pdf.some((citation) => citation.verified);
-  const finalScore = outcome.review !== undefined && hasVerifiedCitation && outcome.review.is_correct
+  const finalScore = panelRaisesScore(outcome.review)
     ? question.maxScore
     : deterministicScore;
   const scoreOverridden = finalScore !== deterministicScore;

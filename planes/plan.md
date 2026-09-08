@@ -99,24 +99,25 @@ Documentos de origen, en `documentacion/`:
 
 | PR | Plan | Alcance | Estado | Depende de |
 |----|------|---------|--------|-----------|
-| PR-01 | [`pr-01-ssot-schemas/plan.md`](./pr-01-ssot-schemas/plan.md) | Consolidar los 34 schemas de artifact en `packages/shared` y vaciar la copia del server. Refactor sin cambio de comportamiento. | borrador | — |
-| PR-1.5 | [`pr-1.5-sistema-visual/plan.md`](./pr-1.5-sistema-visual/plan.md) | Sistema visual del canvas de Claude Design: capa de tokens `@theme`, fuentes Geist, tema claro y repintado de los cuatro componentes. Deja `documentacion/design-system.md` como norma para todo PR posterior. | borrador | PR-01 |
-| PR-12 | [`pr-12-fuga-tool-calls/plan.md`](./pr-12-fuga-tool-calls/plan.md) | Bug: el modelo escribe la tool call como texto y se renderiza al alumno. Observabilidad (`finishReason`, log por paso), detección y recuperación en el adaptador, timeouts de tools y partes nativas `functionCall`/`functionResponse`. | borrador | PR-01 |
-| PR-12.2 | [`pr-12-2-tool-calls-estructural/plan.md`](./pr-12-2-tool-calls-estructural/plan.md) | Quita la causa: `renderMessage` emite `Prompt.ToolCallPart`/`ToolResultPart` en vez de prosa, `gemini.ts` los traduce a `functionCall`/`functionResponse` y se borran las tres regex. Más `mode: "ANY"` en el reintento, degradación en vez de rendición y log del request. Local a `packages/server`. | borrador | PR-12.1 |
-| PR-09 | [`pr-09-materiales-upload/plan.md`](./pr-09-materiales-upload/plan.md) | Subida de PDFs desde la UI: `POST /api/materials` multipart, `MaterialRepository.create` y componente `PdfUploader` con drag & drop y progreso. | borrador | PR-01 |
-| PR-12.1 | [`pr-12-1-fuga-tool-calls-reintento/plan.md`](./pr-12-1-fuga-tool-calls-reintento/plan.md) | El PR-12 no cerró el bug: `finishReason` como señal primaria, patrón de fuga corregido, reintento acotado dentro del adaptador y purga de sintaxis en texto de skills y prompt. | borrador | PR-12 |
-| PR-13 | [`pr-13-ux-materiales-artefactos/plan.md`](./pr-13-ux-materiales-artefactos/plan.md) | Borrar materiales (`DELETE /api/materials/:id`), botón de cierre del artefacto para recuperar el chat completo, y renombrado del producto a My Favorite Teacher. | borrador | PR-09 |
-| PR-10 | [`pr-10-chat-input-lifecycle/plan.md`](./pr-10-chat-input-lifecycle/plan.md) | Ciclo de vida del input del chat: limpieza inmediata, bloqueo durante la generación, botón Stop con `AbortController` y reintento con restauración del prompt. | borrador | PR-09 |
-| PR-11 | [`pr-11-agente-cortocircuito/plan.md`](./pr-11-agente-cortocircuito/plan.md) | Latencia del agente: inventario de materiales en el system prompt, reglas de cortocircuito de herramientas, descripciones de skills más estrechas y `maxSteps` a 4. | borrador | PR-10 |
-| PR-02 | [`pr-02-evidencia-pagina/plan.md`](./pr-02-evidencia-pagina/plan.md) | `pdftotext` en `PdfService`, `extractText` en el repositorio, `source`/`sourcePage` para enlazar pregunta→página, verificador de citas verbatim, comando `materials text`. | borrador | PR-01 |
-| PR-03 | [`pr-03-structured-output/plan.md`](./pr-03-structured-output/plan.md) | `FinalFeedbackSchema` + `EnrichedFeedbackSchema` en shared, y `generationConfig`/`responseSchema` en `gemini.ts` para que `LanguageModel.generateObject` funcione contra Gemini. | borrador | PR-01 |
-| PR-04 | [`pr-04-evaluation-engine/plan.md`](./pr-04-evaluation-engine/plan.md) | `EvaluationEngineService` aislado: 3 prompts, `Effect.all([bueno, malo], { concurrency: "unbounded", mode: "result" })`, Juez vía `generateObject`, citas enriquecidas a `PdfCitation` verificadas y `short-answer` evaluado por el panel. | borrador | PR-02, PR-03 |
-| PR-05 | [`pr-05-transporte-ndjson/plan.md`](./pr-05-transporte-ndjson/plan.md) | Ruta `POST /api/artifacts/:id/submit/stream` con estados discretos, lector NDJSON resiliente compartido en web y cierre siempre con frame terminal. | borrador | PR-04 |
-| PR-06 | [`pr-06-trazabilidad/plan.md`](./pr-06-trazabilidad/plan.md) | Trazabilidad nativa: log determinista en Markdown bajo `.data/sessions/`, escrito con `Effect.forkDetach` fuera del camino crítico. | borrador | PR-04 |
-| PR-07 | [`pr-07-ui-observabilidad/plan.md`](./pr-07-ui-observabilidad/plan.md) | UI del `ArtifactWorkspace`: estado de evaluación en un atom, los dos profes activos a la vez, Juez después, y render del feedback con las citas y su badge de verificación. | borrador | PR-05 |
-| PR-08 | [`pr-08-evals-entrega/plan.md`](./pr-08-evals-entrega/plan.md) | Evals deterministas sin API key (modelo falso + funciones puras), QA final y README de entrega. **No recortable.** | borrador | PR-07 |
+| PR-01 | [`pr-01-ssot-schemas/plan.md`](./pr-01-ssot-schemas/plan.md) | Consolidar en `packages/shared` todos los schemas de artifact —29 duplicados, 5 que suben del server y 2 que ya sólo estaban en shared, 35 declaraciones en total tras el PR— y vaciar la copia del server. Refactor sin cambio de comportamiento. | mergeado | — |
+| PR-1.5 | [`pr-1.5-sistema-visual/plan.md`](./pr-1.5-sistema-visual/plan.md) | Sistema visual del canvas de Claude Design: capa de tokens `@theme`, fuentes Geist, tema claro y repintado de los cuatro componentes. Deja `documentacion/design-system.md` como norma para todo PR posterior. | mergeado | PR-01 |
+| PR-12 | [`pr-12-fuga-tool-calls/plan.md`](./pr-12-fuga-tool-calls/plan.md) | Bug: el modelo escribe la tool call como texto y se renderiza al alumno. Observabilidad (`finishReason`, log por paso), detección y recuperación en el adaptador, timeouts de tools y partes nativas `functionCall`/`functionResponse`. | mergeado | PR-01 |
+| PR-12.2 | [`pr-12-2-tool-calls-estructural/plan.md`](./pr-12-2-tool-calls-estructural/plan.md) | Quita la causa: `renderMessage` emite `Prompt.ToolCallPart`/`ToolResultPart` en vez de prosa, `gemini.ts` los traduce a `functionCall`/`functionResponse` y se borran las tres regex. Más `mode: "ANY"` en el reintento, degradación en vez de rendición y log del request. Local a `packages/server`. | mergeado | PR-12.1 |
+| PR-09 | [`pr-09-materiales-upload/plan.md`](./pr-09-materiales-upload/plan.md) | Subida de PDFs desde la UI: `POST /api/materials` multipart, `MaterialRepository.create` y componente `PdfUploader` con drag & drop y progreso. | mergeado | PR-01 |
+| PR-12.1 | [`pr-12-1-fuga-tool-calls-reintento/plan.md`](./pr-12-1-fuga-tool-calls-reintento/plan.md) | El PR-12 no cerró el bug: `finishReason` como señal primaria, patrón de fuga corregido, reintento acotado dentro del adaptador y purga de sintaxis en texto de skills y prompt. | mergeado | PR-12 |
+| PR-13 | [`pr-13-ux-materiales-artefactos/plan.md`](./pr-13-ux-materiales-artefactos/plan.md) | Borrar materiales (`DELETE /api/materials/:id`), botón de cierre del artefacto para recuperar el chat completo, y renombrado del producto a My Favorite Teacher. | mergeado | PR-09 |
+| PR-10 | [`pr-10-chat-input-lifecycle/plan.md`](./pr-10-chat-input-lifecycle/plan.md) | Ciclo de vida del input del chat: limpieza inmediata, bloqueo durante la generación, botón Stop con `AbortController` y reintento con restauración del prompt. | mergeado | PR-09 |
+| PR-11 | [`pr-11-agente-cortocircuito/plan.md`](./pr-11-agente-cortocircuito/plan.md) | Latencia del agente: inventario de materiales en el system prompt, reglas de cortocircuito de herramientas, descripciones de skills más estrechas y `maxSteps` a 4. | mergeado | PR-10 |
+| PR-02 | [`pr-02-evidencia-pagina/plan.md`](./pr-02-evidencia-pagina/plan.md) | `pdftotext` en `PdfService`, `extractText` en el repositorio, `source`/`sourcePage` para enlazar pregunta→página, verificador de citas verbatim, comando `materials text`. | mergeado | PR-01 |
+| PR-03 | [`pr-03-structured-output/plan.md`](./pr-03-structured-output/plan.md) | `FinalFeedbackSchema` + `EnrichedFeedbackSchema` en shared, y `generationConfig`/`responseSchema` en `gemini.ts` para que `LanguageModel.generateObject` funcione contra Gemini. | mergeado | PR-01 |
+| PR-04 | [`pr-04-evaluation-engine/plan.md`](./pr-04-evaluation-engine/plan.md) | `EvaluationEngineService` aislado: 3 prompts, `Effect.all([bueno, malo], { concurrency: "unbounded", mode: "result" })`, Juez vía `generateObject`, citas enriquecidas a `PdfCitation` verificadas y `short-answer` evaluado por el panel. | mergeado | PR-02, PR-03 |
+| PR-05 | [`pr-05-transporte-ndjson/plan.md`](./pr-05-transporte-ndjson/plan.md) | Ruta `POST /api/artifacts/:id/submit/stream` con estados discretos, lector NDJSON resiliente compartido en web y cierre siempre con frame terminal. | mergeado | PR-04 |
+| PR-06 | [`pr-06-trazabilidad/plan.md`](./pr-06-trazabilidad/plan.md) | Trazabilidad nativa: log determinista en Markdown bajo `.data/sessions/`, escrito con `Effect.forkDetach` fuera del camino crítico. | mergeado | PR-04 |
+| PR-07 | [`pr-07-ui-observabilidad/plan.md`](./pr-07-ui-observabilidad/plan.md) | UI del `ArtifactWorkspace`: estado de evaluación en un atom, los dos profes activos a la vez, Juez después, y render del feedback con las citas y su badge de verificación. | mergeado | PR-05 |
+| PR-08 | [`pr-08-evals-entrega/plan.md`](./pr-08-evals-entrega/plan.md) | Cierre de la cobertura de tests que dejaron PR-03, PR-05 y PR-06 (`gemini-schema`, `trace-format`, `readNdjson`, stream de evaluación), script `test` en la raíz, QA final y README de entrega. **No recortable.** | implementado, PR #7 abierto | — |
 
-Estados: `por diseñar` → `borrador` → `listo para implementar` → `en curso` → `mergeado`.
+Estados: `por diseñar` → `borrador` → `listo para implementar` → `en curso` →
+`implementado, PR #N abierto` → `mergeado`.
 
 **Los PRs se implementan en orden estricto, uno detrás de otro.** El orden real es
 **PR-01 → PR-1.5 → PR-12 → PR-12.1 → PR-12.2 → PR-09 → PR-13 → PR-10 → PR-11 → PR-02 → … → PR-08**: los PRs de UX se numeran 1.5, 09,
@@ -183,7 +184,9 @@ Antes de tocar nada, el doer lee `documentacion/contexto-repo.md` (mapa de arqui
 - `rewriteRelativeImportExtensions`: **los imports relativos llevan `.ts`**.
 - No crear `packages/web/src/api/` — colisiona con el proxy de Vite
   (`root: "src"`). El cliente vive en `src/api-client/`.
-- `packages/web/src/styles.generated.css` es generado: se edita `styles.input.css`.
+- Tailwind v4 corre como plugin de Vite (`@tailwindcss/vite`, `vite.config.ts:3,10`). La
+  única hoja de estilos del repo es `packages/web/src/styles.input.css`; no hay CSS
+  generado en el árbol de fuentes.
 - Persistencia: ficheros bajo `packages/server/.data/`. No se añade base de
   datos ni auth (`CHALLENGE.md` lo excluye explícitamente como mejora principal).
 - El agente expone al modelo **solo dos tools**: `load_skill` y `cli`. Añadir
@@ -191,13 +194,22 @@ Antes de tocar nada, el doer lee `documentacion/contexto-repo.md` (mapa de arqui
 - Si se añade una tool de modelo, hay que tocar `toolParameters` en
   `packages/server/src/domain/agents/gemini.ts` (schemas hardcodeados por nombre).
 
-### Checks (no hay test runner)
+### Checks
+
+Sí hay test runner: vitest `^5.0.0` en `packages/server` y `packages/web`, desde el commit
+`03a8d80` (anterior a PR-03 y PR-04). Eran 11 ficheros y 91 tests cuando se escribió este
+plan; **cerrado el PR-08 son 15 ficheros y 137 tests** (server 12/117, web 3/20), sin API
+key ni red.
 
 ```bash
 pnpm run typecheck                            # gate principal
+pnpm -r test                                  # sin API key, sin red
 pnpm --filter @proxus/web run build
 pnpm --filter @proxus/server run eval:tutor:artifact-authoring   # requiere API key
 ```
+
+> PR-08 paso 1 añadió un `test` en el `package.json` de la raíz; a partir de ahí,
+> `pnpm run test`. Hecho.
 
 QA manual: `docs/testing.md`.
 
@@ -258,12 +270,15 @@ Cambios al plan hechos por el thinker tras feedback del doer.
 Verificados en el código. Están desarrollados en
 [`documentacion/funcionamiento-actual.md`](../documentacion/funcionamiento-actual.md) §9.
 
-1. **No hay extracción de texto de PDF.** Solo `pdfinfo` + `pdftoppm`. Sin eso no hay
-   citas literales que verificar.
+1. ~~No hay extracción de texto de PDF: solo `pdfinfo` + `pdftoppm`~~ **Eliminado desde
+   PR-02**: `PdfService` ejecuta `pdftotext` y `MaterialRepository.extractText` devuelve
+   el texto por página, que es contra lo que se verifica cada cita.
 2. **No hay RAG**: ni chunking, ni embeddings, ni índice, ni búsqueda. Se cita por
    página.
-3. **No hay salida estructurada**: `gemini.ts` nunca envía `generationConfig`, así que
-   `responseMimeType` y `responseSchema` son inalcanzables hoy.
+3. ~~No hay salida estructurada: `gemini.ts` nunca envía `generationConfig`~~ **Eliminado
+   desde PR-03**: el adaptador honra `responseFormat` y manda `responseMimeType` +
+   `responseSchema` (`domain/agents/gemini.ts:236-241`), así que
+   `LanguageModel.generateObject` funciona contra Gemini.
 4. **`streamText` es `Stream.empty`**: no hay streaming de tokens. Solo eventos de
    mensaje completo. La UI muestra fases discretas, no texto token a token.
 5. **El estado del chat no está en atoms**, sigue en `useState` —cinco de ellos, dentro
@@ -273,8 +288,9 @@ Verificados en el código. Están desarrollados en
 6. ~~El cliente NDJSON decodifica en estricto~~ **Eliminado desde PR-05**: `readNdjson`
    (`packages/web/src/lib/ndjson.ts`) envuelve cada línea en `try/catch` y salta la que no
    decodifica con un `console.warn`, en vez de reventar el generador entero.
-7. **Los artifacts no guardan su material de origen.** Hay que añadir ese enlace para
-   poder citar.
+7. ~~Los artifacts no guardan su material de origen~~ **Eliminado desde PR-02**: el
+   artifact lleva `source: { materialId, pages }` y cada pregunta puede llevar
+   `sourcePage`, que es el enlace pregunta→página que usa el panel.
 8. **No existe `packages/server/.data/`** en un checkout limpio: hay que colocar un PDF
    antes de que la QA manual signifique nada.
 

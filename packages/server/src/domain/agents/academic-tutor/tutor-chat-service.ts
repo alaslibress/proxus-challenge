@@ -44,7 +44,10 @@ export const TutorChatServiceLive = Layer.effect(
     const sessionInput = (input: TutorChatRequest) => ({
       input: input.input,
       messages: input.messages,
-      maxSteps: input.maxSteps ?? 4
+      // A materials-backed request costs two `load_skill` calls, one or two `materials text`
+      // calls and one `artifacts create` before the tutor can even start writing. PR-11 set
+      // this to 4 for latency, which made those flows structurally impossible to finish.
+      maxSteps: input.maxSteps ?? 8
     });
 
     return {

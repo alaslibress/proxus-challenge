@@ -19,6 +19,7 @@ Use the existing scripts:
 
 ```sh
 pnpm run typecheck
+pnpm run test                 # vitest, both packages; no API key, no network
 pnpm --filter @proxus/web run build
 pnpm --filter @proxus/server run typecheck
 ```

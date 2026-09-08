@@ -90,11 +90,19 @@ devuelve `POST /api/artifacts/:id/submit` con el mismo cuerpo. Un fallo del moto
 - `quiz`: preguntas cerradas.
 - `test`: preguntas cerradas o `short-answer`.
 
-Tipos de pregunta:
+Tipos de pregunta y campos obligatorios (`sourcePage` es siempre opcional):
 
-- `multiple-choice`
-- `true-false`
-- `short-answer` solo para tests.
+| Tipo | Dónde | Obligatorios | Opcionales |
+|---|---|---|---|
+| `multiple-choice` | quiz y test | `type`, `id`, `prompt`, `options`, `correctOptionId`, `explanation` | `sourcePage` |
+| `true-false` | quiz y test | `type`, `id`, `prompt`, `correctAnswer` (boolean), `explanation` | `sourcePage` |
+| `short-answer` | solo test | `type`, `id`, `prompt`, `expectedAnswer` | `maxScore` (por defecto `1`), `sourcePage` |
+
+`short-answer` usa `expectedAnswer`, no `correctAnswer`. Las cerradas valen 1 punto fijo,
+por eso `maxScore` solo existe en `short-answer` y ahora se rellena solo si se omite.
+
+No existe pregunta de selección múltiple con varias respuestas correctas:
+`correctOptionId` es un único id.
 
 Formato correcto para multiple choice:
 

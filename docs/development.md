@@ -2,7 +2,7 @@
 
 ## Requisitos
 
-- Node.js 20+.
+- Node.js 22.18+ (vitest 5 exige `^22.12 || ^24 || >=26`; los scripts CLI usan `import.meta.main`).
 - pnpm.
 - Poppler si vas a trabajar con PDFs:
   - macOS: `brew install poppler`
@@ -20,7 +20,7 @@ Edita `.env`:
 
 ```env
 GOOGLE_GENERATIVE_AI_API_KEY=...
-GEMINI_MODEL=gemini-2.5-flash
+GEMINI_MODEL=gemini-3.6-flash
 PORT=3000
 WEB_PORT=5173
 PROXUS_API_URL=http://localhost:3000
