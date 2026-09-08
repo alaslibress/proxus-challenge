@@ -6,7 +6,7 @@ import {
   Response
 } from "effect/unstable/ai";
 
-const defaultModel = "gemini-2.5-flash";
+const defaultModel = "gemini-3.6-flash";
 
 const FunctionCall = Schema.Struct({
   name: Schema.optional(Schema.String),
@@ -104,9 +104,8 @@ const messageParts = (message: LanguageModel.ProviderOptions["prompt"]["content"
     if (part.type === "tool-call") {
       const p = part as unknown as { name: string; params: Record<string, unknown>; id: string };
       // Recover thoughtSignature encoded into the id by toResponseParts (format: "call_<uuid>||<sig>").
-      const separatorIdx = p.id.indexOf("||");
-      const thoughtSignature = separatorIdx !== -1 ? p.id.slice(separatorIdx + 2) : undefined;
-      const fcPart: GeminiContentPart = { functionCall: { name: p.name, args: p.params ?? {} }, ...(thoughtSignature ? { thoughtSignature } : {}) };
+      const thoughtSignature = decodeThoughtSignature(p.id);
+      const fcPart: GeminiContentPart = { functionCall: { name: p.name, args: p.params ?? {} }, ...(thoughtSignature !== undefined ? { thoughtSignature } : {}) };
       return [fcPart];
     }
 
@@ -239,6 +238,14 @@ const requestBody = (options: LanguageModel.ProviderOptions) => ({
   toolConfig: toolConfig(options)
 });
 
+export const encodeToolCallId = (baseId: string, thoughtSignature: string | undefined): string =>
+  thoughtSignature !== undefined ? `${baseId}||${thoughtSignature}` : baseId;
+
+export const decodeThoughtSignature = (id: string): string | undefined => {
+  const sep = id.indexOf("||");
+  return sep !== -1 ? id.slice(sep + 2) : undefined;
+};
+
 const firstFunctionCall = (parts: ReadonlyArray<GeminiPart>) =>
   parts.find((part) => part.functionCall?.name !== undefined)?.functionCall;
 
@@ -284,9 +291,7 @@ const toResponseParts = (
     // thoughtSignature is encoded into the id so Effect transports it opaquely through its
     // prompt and we can recover it when building history (see messageParts, "tool-call" case).
     const thoughtSignature = parts.find((p) => p.functionCall?.name !== undefined)?.thoughtSignature;
-    const id = thoughtSignature
-      ? `call_${crypto.randomUUID()}||${thoughtSignature}`
-      : `call_${crypto.randomUUID()}`;
+    const id = encodeToolCallId(`call_${crypto.randomUUID()}`, thoughtSignature);
 
     return {
       responseParts: [

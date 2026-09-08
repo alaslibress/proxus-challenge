@@ -236,7 +236,7 @@ const renderPrompt = (
   return result;
 };
 
-const formatToolResult = (result: unknown) => {
+export const formatToolResult = (result: unknown) => {
   if (typeof result === "string") {
     return result;
   }
