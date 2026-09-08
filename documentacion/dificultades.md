@@ -216,6 +216,84 @@ onClose !== undefined
 
 ---
 
+---
+
+## PR-10 — Ciclo de vida del input del chat
+
+### `AbortError` se pintaba como mensaje de error rojo
+
+**Síntoma**: al pulsar *Stop*, el textarea recuperaba el texto (correcto) pero también aparecía un mensaje de error rojo en la interfaz.
+
+**Causa**: el bloque `catch` del hook hacía `setError(cause.message)` sin filtrar el caso de aborto. `fetch` con una señal abortada rechaza con `DOMException{name:"AbortError"}`; eso no es un error del sistema sino una acción voluntaria del usuario.
+
+**Solución**: exportar `isAbortError` en `stream.ts` y usarlo en el `catch`:
+```ts
+if (!isAbortError(cause)) setError(cause instanceof Error ? cause.message : "...");
+```
+
+**Descartado**: comparar el mensaje de string (`"The user aborted a request."`), que varía por navegador.
+
+---
+
+### `event.nativeEvent.isComposing` impide entrada en japonés/chino y teclados con acentos muertos
+
+**Síntoma**: sin el guard de `isComposing`, pulsar `Enter` durante la composición IME (p.ej. seleccionar un kanji) enviaba el mensaje incompleto.
+
+**Causa**: el evento `keydown` de `Enter` se dispara durante la composición para confirmar el carácter, no para enviar el formulario. Sin el guard, el handler lo interpreta como envío.
+
+**Solución**:
+```ts
+if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) { ... }
+```
+
+**Descartado**: escuchar solo `compositionend` (complica el manejo general del teclado).
+
+---
+
+### `reader.cancel()` faltaba → socket colgado tras `break` o excepción del consumidor
+
+**Síntoma**: al abortar el fetch (botón *Stop*), el `ReadableStream` interno del body seguía abierto y la conexión TCP no se cerraba inmediatamente.
+
+**Causa**: el generador `streamTutorMessage` tenía el bucle `while(true)` sin `finally`. Cuando el consumidor sale del `for await` (por un `break` o por lanzar), el runtime cierra el generador pero no el reader subyacente.
+
+**Solución**: envolver el bucle en `try { ... } finally { await reader.cancel().catch(() => {}); }`. El `.catch(() => {})` silencia el error si el reader ya estaba cerrado.
+
+**Descartado**: no hacer nada (las conexiones se agotan eventualmente, pero supone un leak bajo carga).
+
+---
+
+### Restaurar el historial parcial al fallar a mitad de stream
+
+**Síntoma**: si el stream muere a mitad (red cortada, server caído tras el primer frame), en `messages` quedaban un `user`, quizá un `tool-call` y un `tool-result` huérfanos. Reintentar con ese historial le mandaba al modelo una conversación mutilada.
+
+**Causa**: el hook acumulaba mensajes en el estado de forma incremental. Un fallo no deshacía los mensajes parciales que ya habían llegado.
+
+**Solución**: en el `catch`, restaurar al historial previo al envío:
+```ts
+setMessages(history);  // history capturado antes del run
+setInput(prompt);      // devolver también el texto
+```
+El usuario pierde la vista parcial del stream, pero el modelo recibirá un historial coherente en el reintento.
+
+**Descartado**: dejar los mensajes parciales (manda un historial con tool calls sin cerrar al modelo, que puede generar respuestas incoherentes).
+
+---
+
+### `signal: AbortSignal | undefined` no asignable a `RequestInit.signal: AbortSignal | null`
+
+**Síntoma**: TS2769 al pasar `signal: options?.signal` a `fetch` — `RequestInit.signal` admite `AbortSignal | null`, no `AbortSignal | undefined`, y `exactOptionalPropertyTypes` prohíbe el paso de `undefined` explícito.
+
+**Causa**: `exactOptionalPropertyTypes: true` distingue "propiedad ausente" de "propiedad presente con valor `undefined`". La firma de `fetch` usa `null` como sentinel de ausencia de señal, no `undefined`.
+
+**Solución**: conditional spread:
+```ts
+...(options?.signal !== undefined ? { signal: options.signal } : {})
+```
+
+**Descartado**: cambiar el tipo de `StreamOptions.signal` a `AbortSignal | null` (interfaz más difícil de usar desde el callsite).
+
+---
+
 ### Rate limit de 20 peticiones/día (free tier) bloquea el QA del agente
 
 **Síntoma**: tras varios runs de debug y QA, el agente devuelve 429 `RESOURCE_EXHAUSTED`: *"Quota exceeded for metric: generativelanguage.googleapis.com/generate_content_free_tier_requests, limit: 20, model: gemini-3.6-flash"*.

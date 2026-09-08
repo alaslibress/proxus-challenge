@@ -1,12 +1,7 @@
-import { useAtomRefresh } from "@effect/atom-react";
 import type { AgentMessage } from "@proxus/shared";
-import { useRef, useState } from "react";
 import { Streamdown } from "streamdown";
 import "streamdown/styles.css";
-import { artifactsQuery } from "../domain/artifacts/atoms.ts";
-import { materialsQuery } from "../domain/materials/atoms.ts";
-import { applyInvalidations, invalidationsForToolCall } from "../domain/tutor/invalidation.ts";
-import { streamTutorMessage } from "../domain/tutor/stream.ts";
+import { useTutorChat } from "../domain/tutor/use-tutor-chat.ts";
 
 const starterPrompts = [
   "List my uploaded materials",
@@ -15,59 +10,7 @@ const starterPrompts = [
 ] as const;
 
 export function Chat() {
-  const [messages, setMessages] = useState<readonly AgentMessage[]>([]);
-  const [input, setInput] = useState("");
-  const [isSending, setIsSending] = useState(false);
-  const [error, setError] = useState<string | undefined>();
-  const refreshArtifacts = useAtomRefresh(artifactsQuery);
-  const refreshMaterials = useAtomRefresh(materialsQuery);
-  const pendingInvalidations = useRef<Array<ReturnType<typeof invalidationsForToolCall>>>([]);
-
-  const submit = async (nextInput: string) => {
-    const trimmed = nextInput.trim();
-    if (trimmed.length === 0 || isSending) {
-      return;
-    }
-
-    setIsSending(true);
-    setError(undefined);
-    pendingInvalidations.current = [];
-
-    try {
-      for await (const event of streamTutorMessage({
-        input: trimmed,
-        messages,
-        maxSteps: 8
-      })) {
-        if (event.type === "done") {
-          continue;
-        }
-
-        const message = event.message;
-        setMessages((current) => [...current, message]);
-
-        if (message.role === "tool-call") {
-          pendingInvalidations.current.push(invalidationsForToolCall(message));
-        }
-
-        if (message.role === "tool-result") {
-          const keys = pendingInvalidations.current.shift() ?? [];
-          if (!message.isFailure) {
-            applyInvalidations(keys, {
-              refreshArtifacts,
-              refreshMaterials
-            });
-          }
-        }
-      }
-
-      setInput("");
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : String(cause));
-    } finally {
-      setIsSending(false);
-    }
-  };
+  const chat = useTutorChat();
 
   return (
     <main className="grid h-screen max-h-screen min-w-0 grid-rows-[auto_1fr_auto_auto] bg-canvas max-md:h-auto max-md:max-h-none">
@@ -96,15 +39,15 @@ export function Chat() {
           className="rounded-full border border-line-strong bg-transparent text-ink-mute hover:bg-surface-muted disabled:cursor-not-allowed disabled:opacity-50"
           style={{ padding: "8px 16px", fontSize: 13, transitionDuration: "120ms", transitionTimingFunction: "var(--ease-dc)" }}
           type="button"
-          onClick={() => setMessages([])}
-          disabled={messages.length === 0}
+          onClick={chat.clear}
+          disabled={chat.messages.length === 0 || chat.status === "sending"}
         >
           Clear chat
         </button>
       </header>
 
       <section className="flex flex-col gap-4 overflow-y-auto p-6" aria-live="polite">
-        {messages.length === 0
+        {chat.messages.length === 0
           ? (
               <div className="m-auto w-full max-w-3xl text-center">
                 <h2
@@ -119,11 +62,12 @@ export function Chat() {
                 <div className="mt-6 grid grid-cols-3 gap-3 max-lg:grid-cols-1">
                   {starterPrompts.map((prompt) => (
                     <button
-                      className="rounded-2xl border border-line-strong bg-transparent text-ink-mute hover:bg-surface-muted"
+                      className="rounded-2xl border border-line-strong bg-transparent text-ink-mute hover:bg-surface-muted disabled:cursor-not-allowed disabled:opacity-50"
                       style={{ padding: 16, fontSize: 13, transitionDuration: "120ms", transitionTimingFunction: "var(--ease-dc)" }}
                       key={prompt}
                       type="button"
-                      onClick={() => void submit(prompt)}
+                      disabled={chat.status === "sending"}
+                      onClick={() => chat.submit(prompt)}
                     >
                       {prompt}
                     </button>
@@ -131,22 +75,43 @@ export function Chat() {
                 </div>
               </div>
             )
-          : messages.map((message, index) => <MessageBubble key={index} message={message} />)}
+          : chat.messages.map((message, index) => <MessageBubble key={index} message={message} />)}
+        {chat.status === "sending" && (
+          chat.messages.length === 0 || chat.messages[chat.messages.length - 1]?.role !== "assistant"
+        ) && (
+          <div className="flex justify-start px-6">
+            <div className="rounded-2xl border border-line bg-surface shadow-card px-4 py-3">
+              <span className="animate-pulse text-ink-faint">···</span>
+            </div>
+          </div>
+        )}
       </section>
 
-      {error === undefined ? null : (
-        <p className="m-0 px-6 pb-3 text-danger" style={{ fontSize: 13 }}>{error}</p>
+      {chat.error === undefined ? null : (
+        <div className="mx-6 mb-3 flex items-center justify-between gap-4 rounded-xl border border-danger-line bg-danger-tint px-4 py-3">
+          <p className="m-0 text-danger-ink" style={{ fontSize: 13 }}>{chat.error}</p>
+          {chat.canRetry && (
+            <button
+              type="button"
+              onClick={chat.retry}
+              className="shrink-0 rounded-full border border-danger-line text-danger-ink hover:border-danger"
+              style={{ padding: "4px 12px", fontSize: 13 }}
+            >
+              Retry
+            </button>
+          )}
+        </div>
       )}
 
       <form
         className="grid grid-cols-[1fr_auto] gap-3 border-t border-line bg-surface-raised px-6 pt-4 pb-6"
         onSubmit={(event) => {
           event.preventDefault();
-          void submit(input);
+          chat.submit(chat.input);
         }}
       >
         <textarea
-          className="w-full resize-y bg-surface border border-line-strong text-ink outline-none"
+          className="w-full resize-y bg-surface border border-line-strong text-ink outline-none disabled:cursor-not-allowed disabled:opacity-60"
           style={{
             borderRadius: 14,
             padding: "14px 16px",
@@ -164,28 +129,56 @@ export function Chat() {
             e.currentTarget.style.borderColor = "";
             e.currentTarget.style.boxShadow = "";
           }}
-          value={input}
-          onChange={(event) => setInput(event.currentTarget.value)}
-          placeholder="Ask your tutor something…"
-          rows={3}
-        />
-        <button
-          className="self-end text-white bg-brand hover:bg-brand-hover disabled:opacity-50 disabled:cursor-not-allowed disabled:shadow-none"
-          style={{
-            borderRadius: 8,
-            padding: "12px 20px",
-            fontSize: 14,
-            fontWeight: 600,
-            boxShadow: "var(--shadow-brand)",
-            transitionProperty: "background-color, box-shadow",
-            transitionDuration: "120ms",
-            transitionTimingFunction: "var(--ease-dc)",
+          onKeyDown={(e) => {
+            if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
+              e.preventDefault();
+              chat.submit(chat.input);
+            }
           }}
-          type="submit"
-          disabled={isSending || input.trim().length === 0}
-        >
-          {isSending ? "Thinking…" : "Send"}
-        </button>
+          value={chat.input}
+          onChange={(event) => chat.setInput(event.currentTarget.value)}
+          placeholder={chat.status === "sending" ? "Waiting for the tutor…" : "Ask your tutor something…"}
+          rows={3}
+          disabled={chat.status === "sending"}
+          aria-busy={chat.status === "sending"}
+        />
+        {chat.status === "sending"
+          ? (
+              <button
+                type="button"
+                onClick={chat.stop}
+                className="self-end rounded-full border border-line-strong bg-surface-raised text-ink hover:border-brand"
+                style={{
+                  padding: "12px 20px",
+                  fontSize: 14,
+                  fontWeight: 600,
+                  transitionProperty: "border-color",
+                  transitionDuration: "120ms",
+                  transitionTimingFunction: "var(--ease-dc)",
+                }}
+              >
+                Stop
+              </button>
+            )
+          : (
+              <button
+                type="submit"
+                disabled={chat.input.trim().length === 0}
+                className="self-end text-white bg-brand hover:bg-brand-hover disabled:opacity-50 disabled:cursor-not-allowed disabled:shadow-none"
+                style={{
+                  borderRadius: 8,
+                  padding: "12px 20px",
+                  fontSize: 14,
+                  fontWeight: 600,
+                  boxShadow: "var(--shadow-brand)",
+                  transitionProperty: "background-color, box-shadow",
+                  transitionDuration: "120ms",
+                  transitionTimingFunction: "var(--ease-dc)",
+                }}
+              >
+                Send
+              </button>
+            )}
       </form>
     </main>
   );

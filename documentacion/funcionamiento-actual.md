@@ -59,7 +59,7 @@ Chat.tsx ──fetch POST /api/tutor/chat/stream──► server.ts (HttpRouter 
   decodifica con **`Schema.decodeUnknownSync`**, que lanza: **un frame de tipo
   desconocido revienta el generador y mata el stream entero**. Server y web tienen que
   desplegarse juntos ante cualquier cambio de protocolo.
-- No hay `AbortSignal`: no se puede cancelar una petición en curso.
+- **`AbortSignal` (PR-10)**: el cliente cancela la petición con `AbortController`. `Stop` aborta el fetch y restaura el input; el servidor sigue trabajando hasta completar su bucle (cancelar el fiber del servidor requiere que `HttpServerResponse.stream` propague la desconexión, no verificado en `4.0.0-beta.83`).
 
 ---
 
@@ -240,22 +240,23 @@ todo el color viene de tokens del design system. Ver `documentacion/design-syste
 - **Cerrar artefacto**: `ArtifactWorkspace` tiene un botón `Close` en una cabecera *sticky*. `Escape` también cierra (excepto si el foco está en un `<input>` o `<textarea>`). Pulsar de nuevo el artefacto seleccionado en el sidebar lo cierra (toggle). La conversación del chat no se pierde.
 - `deleteMaterialAction` usa `apiRuntime.fn` con `reactivityKeys: ["materials"]` — el mismo patrón que `submitArtifactAttemptAction`.
 
-**El estado del chat no está en atoms**: son cuatro `useState` dentro de
-`Chat.tsx:18-24`. `domain/tutor/atoms.ts` contiene un único action que apunta al
-endpoint **no** streaming y **no tiene ni un call site**: código muerto.
+**El estado del chat vive en el hook `useTutorChat`** (PR-10, `domain/tutor/use-tutor-chat.ts`). El hook expone `messages`, `input`, `status` (`"idle"|"sending"`), `error`, `canRetry`, y las acciones `submit`, `stop`, `retry`, `clear`, `setInput`. `Chat.tsx` es pura presentación: no contiene lógica de red. `domain/tutor/atoms.ts` contiene un único action que apunta al endpoint **no** streaming y **no tiene ni un call site**: código muerto.
 
 Los atoms que sí se usan son los de datos: `materialsQuery`, `artifactsQuery`,
 `artifactQuery(id)` y `submitArtifactAttemptAction`, todos con
 `Atom.withReactivity`. Cuando llega un tool result de `artifacts create|submit|grade` o
-`materials import|delete|index`, `domain/tutor/invalidation.ts` dispara un refresh
-(`Chat.tsx:49-61`), emparejando call y result con una cola FIFO que asume que no hay
-tool calls en paralelo.
+`materials import|delete|index`, `domain/tutor/invalidation.ts` dispara un refresh, emparejando call y result con una cola FIFO que asume que no hay tool calls en paralelo.
 
-**Observabilidad del razonamiento hoy: prácticamente ninguna.** El botón de enviar
-cambia a `"Thinking…"` (`Chat.tsx:135`) y aparecen filas `<details>` con volcados JSON
-crudos de tool calls y results (`:142-154`), sin distinguir siquiera si el result fue un
-fallo. No hay burbuja de pendiente, ni contador de pasos, ni temporizador, ni botón de
-parar, ni auto-scroll.
+**Ciclo de vida del input (PR-10)**:
+- `setInput("")` ocurre **antes** del primer `await` (en el mismo frame que `submit`), no tras el bucle.
+- El textarea queda `disabled` durante la generación (`aria-busy`), con cursor `not-allowed` y placeholder *"Waiting for the tutor…"*.
+- El botón conmuta entre `Send` (idle) y `Stop` (sending). `Stop` nunca va `disabled`.
+- Un aborto restaura el texto al textarea sin mostrar error.
+- Un fallo deshace los mensajes parciales (vuelve al historial previo al envío) y restaura el texto. Si `canRetry` es `true`, aparece un botón `Retry`.
+- `Enter` envía; `Shift+Enter` inserta salto de línea. Guard de IME (`isComposing`).
+- Mientras `status === "sending"` y el último mensaje no es `assistant`, se muestra una burbuja de puntos animados (`animate-pulse`).
+- El hook registra un `useEffect` de desmontaje con `abortRef.current?.abort()`.
+- El contador de pasos, temporizador y auto-scroll son del PR-07.
 
 El flujo de resolver un ejercicio está en `ArtifactWorkspace.tsx` (380 líneas): respuestas
 en estado local, `submit` vía `submitArtifactAttemptAction` en modo promesa, y al volver
