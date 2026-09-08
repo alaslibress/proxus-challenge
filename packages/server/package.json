@@ -10,12 +10,17 @@
     "agent:tutor": "node --env-file=../../.env --import tsx src/domain/agents/academic-tutor.ts",
     "dev": "node --env-file=../../.env --import tsx src/index.ts",
     "eval:tutor:artifact-authoring": "node --env-file=../../.env --import tsx src/domain/agents/academic-tutor/evals/artifact-authoring.eval.ts",
-    "typecheck": "tsc -p tsconfig.json --noEmit"
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest"
   },
   "dependencies": {
     "@effect/ai-google": "workspace:*",
     "@effect/platform-node": "4.0.0-beta.83",
     "@proxus/shared": "workspace:*",
     "effect": "4.0.0-beta.83"
+  },
+  "devDependencies": {
+    "vitest": "^5.0.0"
   }
 }
