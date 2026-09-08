@@ -408,7 +408,7 @@ const runEvalCase = (
 ) => Effect.gen(function* () {
   const materialRepository = yield* MaterialRepository;
   const artifactRepository = yield* ArtifactRepository;
-  const harness = makeAcademicTutorHarness(materialRepository, artifactRepository);
+  const harness = makeAcademicTutorHarness(materialRepository, artifactRepository, "No PDF materials have been uploaded yet.");
   const session = AgentSession.make(harness);
   const result = yield* session.run({
     input: testCase.input,

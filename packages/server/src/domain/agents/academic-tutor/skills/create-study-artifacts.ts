@@ -2,7 +2,7 @@ import { AgentSkill } from "../../harness/index.ts";
 
 export const CreateStudyArtifactsSkill = AgentSkill.make({
   name: "create-study-artifacts",
-  description: "Create and manage study artifacts: markdown notes, quizzes, tests, submissions, and graded attempts.",
+  description: "Create, list, submit or grade study artifacts (notes, quizzes, tests). Only when the user asks for one of those actions.",
   content: [
     "# Create study artifacts",
     "",
@@ -34,7 +34,7 @@ export const CreateStudyArtifactsSkill = AgentSkill.make({
     "- `artifacts submit '{\"artifactKind\":\"quiz\",\"artifactId\":\"<id>\",\"answers\":[{\"questionType\":\"true-false\",\"questionId\":\"q1\",\"answer\":true}]}'`",
     "",
     "Workflow:",
-    "1. For artifacts based on uploaded materials, inspect the uploaded material first.",
+    "1. If the user asks for an artifact about a specific uploaded PDF, render the relevant pages first. If they ask for one about a general topic, write it from your own knowledge.",
     "2. Create a compact artifact that directly matches the user's request.",
     "3. Use stable question ids like `q1`, `q2`, `q3`.",
     "4. For quizzes, prefer true-false and multiple-choice because grading is deterministic.",

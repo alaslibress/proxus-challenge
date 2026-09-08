@@ -73,6 +73,8 @@ El modelo **no** ve el backend. Ve dos funciones (`domain/agents/harness/harness
 El system prompt (`harness.ts:52-62`) lista solo **nombres y descripciones de una línea**
 de las skills; el contenido se expande bajo demanda. Las skills son texto, no tools.
 
+**PR-11 (perf/agente-cortocircuito)**: el prompt del tutor se construye **por petición**, no una vez al levantar el layer. Cada llamada a `sendMessage`/`streamMessage` invoca `materialRepository.list()` y construye una sección `## Uploaded materials` con id, título y páginas de cada PDF. Si `list()` falla, el prompt indica que no hay materiales (el chat no cae). El prompt incluye reglas explícitas: responder directamente sin tool call cuando la pregunta es de conocimiento general, saludo, o la información ya está en la conversación; llamar a `materials view` solo con ids del inventario; **nunca** llamar a `materials list`. Esto elimina los dos round-trips innecesarios previos (load_skill + materials list) para preguntas directas. `maxSteps` bajó de 8 a 4 en el tutor (suficiente para `load_skill` + `artifacts create` + respuesta + margen).
+
 El CLI (`harness/cli.ts`, 389 líneas) es un parser propio con `--help`, subcomandos,
 tokenización con comillas y **argumentos posicionales por orden de clave** (no hay
 flags). Los errores del CLI se devuelven al modelo como texto, no como fallo.

@@ -15,17 +15,46 @@ import { AcademicTutorSkills } from "./academic-tutor/skills/index.ts";
 
 export const makeAcademicTutorHarness = (
   materialRepository: MaterialRepository,
-  artifactRepository: ArtifactRepository
+  artifactRepository: ArtifactRepository,
+  materialsContext: string
 ) => AgentHarness.make({
   name: `You are an academic tutor agent.
 
 You help students understand academic material, especially their uploaded PDF materials.
 Be precise, pedagogical, and honest about what you can infer from the available materials.
 
-## Tools
+## Answer directly, without any tool call, when
 
-- Use the provided functions to act. Calling a function is a structured action, never something you describe or announce in your reply.
-- If you cannot perform an action, say so in plain language and continue with what you know.`,
+- The question can be answered from general academic knowledge: definitions, worked
+  examples, explanations, study techniques.
+- The user is greeting you, thanking you, or asking what you can do.
+- No PDF materials are uploaded (see the inventory below) and the user is not asking you
+  to create, list, or grade an artifact.
+- The information you need is already in this conversation, including results of tool
+  calls from earlier turns.
+
+Answering directly is the default. A tool call must earn its place.
+
+## Use a tool only when
+
+- \`cli({"input": "materials view <id> <pages>"})\`: the answer depends on what a specific
+  PDF actually says, and the inventory below already tells you the id exists.
+- \`cli({"input": "artifacts ..."})\`: the user asked you to create, list, show, submit or
+  grade a note, quiz or test.
+- \`load_skill\`: immediately before performing the workflow that skill describes. Never
+  load a skill to decide whether to answer.
+
+## Hard rules
+
+- Never call \`materials list\`. The inventory below is current for this turn.
+- Never chain a second tool call unless the first result told you something you still
+  need.
+- If a tool fails, say so plainly in one line and answer with what you know.
+- Each tool call costs the student several seconds of waiting. Spend them deliberately.
+
+## Uploaded materials
+
+${materialsContext}`,
   skills: AcademicTutorSkills,
   commands: [
     makeMaterialCommands(materialRepository),
@@ -45,7 +74,13 @@ export const academicTutorAgent = Effect.gen(function* () {
     Effect.catchTag("SessionNotFound", () => sessionRepository.makeSession({ id: sessionId }))
   );
 
-  const harness = makeAcademicTutorHarness(materialRepository, artifactRepository);
+  const materials = yield* materialRepository.list().pipe(
+    Effect.orElseSucceed(() => [] as const)
+  );
+  const materialsContext = materials.length === 0
+    ? "No PDF materials have been uploaded yet."
+    : materials.map((m) => `- ${m.id}: "${m.title}" (${m.pageCount} pages)`).join("\n");
+  const harness = makeAcademicTutorHarness(materialRepository, artifactRepository, materialsContext);
   const session = AgentSession.make(harness);
 
   console.log(`Provider: ${provider}`);
@@ -56,7 +91,7 @@ export const academicTutorAgent = Effect.gen(function* () {
   const messages = yield* session.stream({
     input: task,
     messages: storedSession.messages,
-    maxSteps: 8
+    maxSteps: 4
   }).pipe(
     Stream.provide(harness.layer),
     Stream.tap((message) => Effect.gen(function* () {
