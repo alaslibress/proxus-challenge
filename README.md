@@ -307,8 +307,12 @@ pnpm --filter @proxus/server run dev   # sólo backend
 # requieren API key y gastan cuota
 pnpm --filter @proxus/server run agent:tutor "lista mis materiales"
 pnpm --filter @proxus/server run eval:tutor:artifact-authoring
-pnpm --filter @proxus/server run panel:check
 pnpm --filter @proxus/server run structured-output:check
+
+# el panel entero sobre un PDF real, sin levantar la app:
+#   panel:check <respuestaAlumno> <respuestaEsperada> <materialId> <página>
+pnpm --filter @proxus/server run panel:check \
+  "respuesta del alumno" "respuesta esperada" mi-material 2
 ```
 
 ## Estructura
@@ -331,7 +335,10 @@ documentacion/            # Documentación de esta entrega
   adr-02-evaluacion-transporte-observabilidad.md   # ADR-02: transporte y trazabilidad
   design-system.md              # Tokens de color y tipografía; norma para toda UI
 
-planes/                   # Los planes de los PRs de esta entrega, PR-01 → PR-08
+planes/                   # Un plan por PR (16 en total): PR-01 → PR-08 son esta entrega,
+                          # PR-09 → PR-13 son el trabajo previo ya en main
+  plan.md                       # Plan general: tabla de PRs, estado y dependencias
+  GUIA-DOER.md                  # Entorno, orden de los PRs y trampas del repo
 ```
 
 Notas de repo: `.data/` está ignorado por git y no existe en un checkout limpio; Tailwind v4
