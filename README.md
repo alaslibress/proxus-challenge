@@ -12,7 +12,7 @@ El objetivo del repo no es ser una app cerrada, sino una base razonable para que
 - Frontend: React 19, Vite, Tailwind v4, `@effect/atom-react`.
 - Contratos compartidos: `packages/shared`.
 - Persistencia local simple: filesystem bajo `packages/server/.data` (`.data` está ignorado por git).
-- PDFs: Poppler (`pdfinfo`, `pdftoppm`) para renderizar páginas que Gemini puede analizar como imágenes.
+- PDFs: Poppler (`pdfinfo`, `pdftoppm`, `pdftotext`) para renderizar páginas que Gemini puede analizar como imágenes y para extraer texto literal citable.
 
 ## Estructura
 
@@ -41,7 +41,7 @@ Requisitos:
 
 - Node.js 20+.
 - pnpm instalado.
-- Poppler instalado (`pdfinfo` y `pdftoppm`) si quieres usar PDFs.
+- Poppler instalado (`pdfinfo`, `pdftoppm` y `pdftotext`) si quieres usar PDFs.
 - Una API key de Google Gemini para probar el agente AI.
 
 Instala dependencias:

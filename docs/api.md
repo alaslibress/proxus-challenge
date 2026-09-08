@@ -87,6 +87,6 @@ El CLI tolera options como strings y las normaliza, pero el contrato estable usa
 
 ## Cliente web
 
-- Cliente API: `packages/web/src/api/client.ts`
+- Cliente API: `packages/web/src/api-client/client.ts`
 - Runtime Effect: `packages/web/src/lib/runtime.ts`
 - Streaming tutor: `packages/web/src/domain/tutor/stream.ts`

@@ -20,6 +20,17 @@ export interface MaterialPageImages {
   readonly pages: readonly PageImage[];
 }
 
+export interface PageText {
+  readonly page: number;
+  readonly text: string;
+}
+
+export interface MaterialPageTexts {
+  readonly type: "material-page-texts";
+  readonly material: PdfMaterial;
+  readonly pages: readonly PageText[];
+}
+
 export class MaterialNotFound extends Data.TaggedError("MaterialNotFound")<{
   readonly materialId: string;
 }> {}
@@ -49,6 +60,10 @@ export interface MaterialRepository {
     id: string,
     pages: readonly number[]
   ) => Effect.Effect<MaterialPageImages, MaterialNotFound | MaterialRepositoryError>;
+  readonly extractText: (
+    id: string,
+    pages: readonly number[]
+  ) => Effect.Effect<MaterialPageTexts, MaterialNotFound | MaterialRepositoryError>;
 }
 
 export const MaterialRepository = Context.Service<MaterialRepository>(
@@ -91,6 +106,15 @@ export const parsePageSelection = (
 
 export const isMaterialPageImages = (value: unknown): value is MaterialPageImages => {
   if (typeof value !== "object" || value === null || !("type" in value) || value.type !== "material-page-images") {
+    return false;
+  }
+
+  const candidate = value as { readonly pages?: unknown };
+  return Array.isArray(candidate.pages);
+};
+
+export const isMaterialPageTexts = (value: unknown): value is MaterialPageTexts => {
+  if (typeof value !== "object" || value === null || !("type" in value) || value.type !== "material-page-texts") {
     return false;
   }
 
