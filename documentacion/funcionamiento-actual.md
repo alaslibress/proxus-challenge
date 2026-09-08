@@ -171,15 +171,31 @@ Tres tipos de artifact: `note` (markdown), `quiz` (multiple-choice y true-false)
 `artifactKind` × `status` (`ungraded` | `graded`); corregir es una transición de estado
 que produce un objeto nuevo.
 
-**La corrección de hoy es 100% determinista y sin LLM.** Vive en
-`packages/server/src/domain/artifacts/artifact.ts`, entrando por `gradeAttempt` (`:90`):
+**La corrección base sigue siendo determinista y sin LLM** (`gradeAttempt` en
+`packages/server/src/domain/artifacts/artifact.ts` nunca añade `LanguageModel` a su canal
+`R`, así que la nota siempre existe aunque Gemini esté caído):
 
 - Multiple-choice: `selectedOptionId === correctOptionId`.
 - True-false: `answer === correctAnswer`.
 - El "feedback" es el campo `explanation` que escribió el autor de la pregunta.
-- **Short-answer: igualdad exacta de strings tras `trim().toLowerCase()`** (`:207`, `:222`).
-  Sin semántica, sin nota parcial, sin rúbrica, sin normalizar acentos ni puntuación.
-  Es el agujero de producto más evidente del repo.
+- Short-answer: igualdad exacta de strings tras `trim().toLowerCase()`
+  (`correctQuestion`/`normalizeAnswer` en `artifact.ts`).
+
+**Desde PR-04, short-answer ya no se queda ahí.** `POST /api/artifacts/:id/submit`
+encadena, tras `gradeAttempt`, un `EvaluationEngineService`
+(`packages/server/src/domain/evaluation/engine.ts`) que ejecuta un panel de tres agentes
+Gemini —Profe Bueno, Profe Malo y Juez— en paralelo (`Effect.all({ mode: "result" })`,
+nunca `Promise.all`) sobre el texto real de la página del PDF (`sourcePage` de la
+pregunta, o todas las páginas del material si no hay `sourcePage`). El Juez devuelve
+`FinalFeedbackSchema` (JSON estructurado con `citas_pdf`), y cada cita se verifica contra
+el texto original con `verifyCitations` (PR-02). El veredicto del panel **solo sube** la
+nota de una respuesta corta cuando hay al menos una cita `verified: true`; nunca la baja.
+Sin evidencia (sin página, sin texto extraíble, o si el LLM falla) se conserva
+íntegra la corrección `===` determinista — es la ruta de reserva declarada, una
+desviación consciente del ADR-01 documentada en `planes/pr-04-evaluation-engine/plan.md`.
+`reviewGradedAttempt` (`domain/evaluation/review.ts`) nunca falla: cualquier error del
+panel se traga y el attempt determinista queda intacto. Multiple-choice y true-false no
+pasan por el panel: siguen siendo 100% deterministas y sin latencia añadida.
 
 Se persiste en `.data/artifacts/attempts/<id>.json` desde
 `infra/artifacts/file-artifact-repository.ts:149-155`.
@@ -323,7 +339,7 @@ Lo que la Tech Spec da por hecho y no existe:
 
 | La spec asume | La realidad |
 |---|---|
-| `citas_pdf` con extractos literales | Ya hay extracción de texto por página (`pdftotext`) y un verificador puro (`domain/materials/citation.ts`) que comprueba las citas contra ese texto. Falta conectarlo al motor/Juez: eso es PR-04. |
+| `citas_pdf` con extractos literales | Conectado desde PR-04: el Juez del `EvaluationEngineService` (`domain/evaluation/engine.ts`) devuelve `citas_pdf` y cada una se verifica contra el texto de página real con `verifyCitations` (`domain/materials/citation.ts`). |
 | "Contexto RAG del PDF", "chunks" | Sigue sin haber RAG: ni chunking, ni embeddings, ni índice, ni búsqueda. La unidad de evidencia es la página completa. |
 | Refactorizar `TutorChatService` para el trío | En el chat no hay "correcciones" que citar. Las correcciones están en `artifact.ts`. |
 | Zod / `@effect/schema` | Ni Zod ni `@effect/schema`: `Schema` del barrel `effect` v4 beta. |

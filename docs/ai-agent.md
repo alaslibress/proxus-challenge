@@ -98,6 +98,65 @@ escribe el objeto decodificado por consola. **El subconjunto de `responseSchema`
 acepta Gemini no está garantizado por ningún tipo**: hay que ejecutar este script contra la
 API real antes de confiar en un schema nuevo.
 
+## Panel de evaluación multi-agente — PR-04
+
+`short-answer` en un `test` deja de corregirse solo por igualdad exacta de strings.
+`POST /api/artifacts/:id/submit` sigue calculando primero la nota determinista
+(`gradeAttempt`, puro, sin LLM, siempre disponible) y luego la enriquece con un panel de
+tres agentes Gemini definido en `packages/server/src/domain/evaluation/`:
+
+- `prompts.ts`: los tres system prompts, aislados.
+- `engine.ts`: `EvaluationEngineService`, el puerto y su layer.
+- `errors.ts`: `EvaluationUnavailable` (único error tipado del motor).
+- `review.ts`: `reviewGradedAttempt`, la capa que conecta el motor con un
+  `ArtifactAttempt` ya corregido.
+- `panel.check.ts`: script de verificación manual sin navegador.
+
+Roles del panel:
+
+1. **Profe Bueno** — motivador, busca qué hay de correcto en la respuesta del alumno.
+   No decide la nota.
+2. **Profe Malo** — crítico, señala lagunas e imprecisiones. Tampoco decide la nota.
+3. **Juez** — recibe ambas críticas (o un aviso de que no hay críticas si los dos
+   profes fallaron) más la respuesta del alumno, la esperada y el texto de la página.
+   Decide `is_correct`, redacta `feedback`, y copia en `citas_pdf` fragmentos literales
+   del texto aportado.
+
+Los tres reciben **solo el texto de la página** (nunca el PDF entero) y tienen prohibido
+usar conocimiento externo al texto aportado.
+
+Concurrencia: los dos profes corren en paralelo con
+`Effect.all([...], { concurrency: "unbounded", mode: "result" })` — nunca `Promise.all`.
+Cada uno va envuelto en `Effect.timeout` (20s). Si ambos fallan, el Juez sigue adelante
+avisado de que no hay críticas disponibles; si falla el Juez, el motor falla con
+`EvaluationUnavailable({ stage: "judge" })`.
+
+**Citas verificadas.** Cada string de `citas_pdf` que devuelve el Juez se comprueba
+contra el texto real de la página con `verifyCitations` (`domain/materials/citation.ts`,
+PR-02), produciendo un `PdfCitation` con `verified: boolean`. Ninguna cita se descarta.
+
+**Regla anti-alucinación.** El veredicto del panel solo **sube** la nota de una
+respuesta corta si `citas_pdf` contiene al menos una cita `verified: true` y el Juez
+marcó `is_correct: true`. Sin evidencia verificada se conserva la corrección
+determinista (`===`), y el `review` se adjunta igualmente para que la UI pueda mostrarlo.
+Bajar la nota nunca aplica: si el `===` ya dijo que era correcta, coincide literalmente
+con la esperada.
+
+`reviewGradedAttempt` **nunca falla**: si no hay `sourcePage` ni páginas del material, si
+el texto extraído está vacío (PDF escaneado), o si el motor falla por cualquier motivo,
+se conserva la corrección determinista intacta y no se llama al LLM.
+
+Multiple-choice y true-false **no pasan por el panel**: siguen siendo 100% deterministas
+y sin latencia añadida.
+
+Script de verificación manual contra la API real:
+
+```bash
+pnpm --filter @proxus/server run panel:check "<respuesta alumno>" "<respuesta esperada>" <materialId> <página>
+```
+
+Imprime las dos críticas, el JSON del Juez y las citas con su `verified`.
+
 ## Configuración
 
 ```env

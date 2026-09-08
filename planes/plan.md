@@ -262,16 +262,18 @@ Verificados en el código. Están desarrollados en
    citas literales que verificar.
 2. **No hay RAG**: ni chunking, ni embeddings, ni índice, ni búsqueda. Se cita por
    página.
-3. **La corrección es determinista y sin LLM** (`domain/artifacts/artifact.ts:346`).
-   `short-answer` se corrige por igualdad exacta de strings.
-4. **No hay salida estructurada**: `gemini.ts` nunca envía `generationConfig`, así que
+3. **No hay salida estructurada**: `gemini.ts` nunca envía `generationConfig`, así que
    `responseMimeType` y `responseSchema` son inalcanzables hoy.
-5. **`streamText` es `Stream.empty`**: no hay streaming de tokens. Solo eventos de
+4. **`streamText` es `Stream.empty`**: no hay streaming de tokens. Solo eventos de
    mensaje completo. La UI muestra fases discretas, no texto token a token.
-6. **El estado del chat no está en atoms**, está en `useState` dentro de `Chat.tsx`.
-7. **El cliente NDJSON decodifica en estricto** y explota con un frame desconocido:
+5. **El estado del chat no está en atoms**, está en `useState` dentro de `Chat.tsx`.
+6. **El cliente NDJSON decodifica en estricto** y explota con un frame desconocido:
    cualquier cambio de protocolo mueve server y web en el mismo PR.
-8. **Los artifacts no guardan su material de origen.** Hay que añadir ese enlace para
+7. **Los artifacts no guardan su material de origen.** Hay que añadir ese enlace para
    poder citar.
-9. **No existe `packages/server/.data/`** en un checkout limpio: hay que colocar un PDF
+8. **No existe `packages/server/.data/`** en un checkout limpio: hay que colocar un PDF
    antes de que la QA manual signifique nada.
+
+_(Eliminado desde PR-04: "la corrección es determinista y sin LLM". `short-answer`
+ahora pasa por un panel multi-agente con citas verificadas; el `===` queda como ruta de
+reserva cuando el panel no está disponible.)_
