@@ -269,7 +269,7 @@ a revisar → bg-warn-tint text-warn-ink border border-warn-line  rounded-full p
 
 1. **Prohibido escribir una clase de color literal de Tailwind en `packages/web`.** Sin excepciones. El color sale de un token.
 2. **¿Falta un color?** Se añade un token a `styles.input.css` y una fila a este documento, en el mismo commit. No se resuelve con un literal "de momento".
-3. **`styles.generated.css` es generado.** Se edita `styles.input.css`.
+3. **`styles.input.css` es el único fichero de estilos.** Tailwind v4 corre como plugin de Vite (`@tailwindcss/vite`) y `main.tsx` lo importa directamente; no hay CSS generado que mantener.
 4. **El guard debe dar 0** antes de abrir cualquier PR de UI:
    ```bash
    grep -rnE '(bg|text|border|ring|from|to|via|fill|stroke|placeholder|divide|shadow|accent)-(slate|sky|indigo|emerald|red|blue|gray|zinc|neutral|stone|violet|purple)-[0-9]{2,3}' packages/web/src/

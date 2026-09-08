@@ -27,9 +27,9 @@ Effect v4 **beta**, `4.0.0-beta.83` pineado exacto en los cuatro paquetes, sin r
 `rewriteRelativeImportExtensions`. Esto último obliga a que **todo import relativo lleve
 la extensión `.ts`/`.tsx`**; se cumple al 100% en el código existente.
 
-**Test runner**: `vitest@5` en `packages/server` (22→27 tests) y `packages/web` (7 tests). Suites:
-- Server: `message.ts` constructores (7), `session.ts` funciones puras (7), `gemini.ts` encode/decode thoughtSignature (8), `tutor-chat-service.ts` buildMaterialsContext (5).
-- Web: `stream.ts` `isAbortError` predicado (7).
+**Test runner**: `vitest@5` en `packages/server` (39 tests) y `packages/web` (10 tests). Suites:
+- Server: `message.ts` constructores (7), `session.ts` funciones puras (7), `gemini.ts` encode/decode thoughtSignature (8), `tutor-chat-service.ts` buildMaterialsContext (5), `material.ts` saneado y colisión de nombres de fichero (12).
+- Web: `stream.ts` `isAbortError` predicado (7), `resolveStreamFailure` parada vs fallo (3).
 El gate sigue siendo `pnpm run typecheck`; los tests son la segunda capa.
 
 ---
@@ -62,7 +62,7 @@ Chat.tsx ──fetch POST /api/tutor/chat/stream──► server.ts (HttpRouter 
   decodifica con **`Schema.decodeUnknownSync`**, que lanza: **un frame de tipo
   desconocido revienta el generador y mata el stream entero**. Server y web tienen que
   desplegarse juntos ante cualquier cambio de protocolo.
-- **`AbortSignal` (PR-10)**: el cliente cancela la petición con `AbortController`. `Stop` aborta el fetch y restaura el input; el servidor sigue trabajando hasta completar su bucle (cancelar el fiber del servidor requiere que `HttpServerResponse.stream` propague la desconexión, no verificado en `4.0.0-beta.83`).
+- **`AbortSignal` (PR-10)**: el cliente cancela la petición con `AbortController`. **El servidor sí cancela**, verificado midiendo: al cortar el cliente a los 7 s, el `http.span` cierra en ese instante, la llamada a Gemini en vuelo se queda sin respuesta y no se registra un `agent.step` más — igual por la ruta directa que a través del proxy de Vite. La cadena es `NodeHttpServer.ts:195-197` (interrumpe el fiber al cerrarse la conexión) → `Stream.callback` en `harness/session.ts:51` (ata el bucle al scope del stream) → `gemini.ts:335-341` (pasa el `signal` al `fetch`). `Stop` conserva los mensajes ya recibidos y **no** repuebla el input: es una parada limpia, no un deshacer (ver §7).
 
 ---
 
@@ -180,12 +180,23 @@ Se persiste en `.data/artifacts/attempts/<id>.json` desde
 Superficie HTTP:
 - `GET /api/materials/` — lista materiales
 - `GET /api/materials/:id` — obtiene un material
+- `POST /api/materials` — sube un PDF (`multipart/form-data`, campo `file`, máx. 25 MB). Devuelve 200 con el `PdfMaterial`, o 400 tipado (`{"_tag":"InvalidPdf","message":"..."}`) si no es un PDF legible. El fichero se valida con `pdfinfo` **sobre el temporal, antes** de moverlo al directorio: un PDF ilegible dentro rompería `list`/`get`/`renderPages` para todos los materiales, no solo para él. El nombre se sanea (sin componentes de directorio, sin caracteres que el sistema de ficheros rechace) y las colisiones se resuelven con sufijo (`apuntes-2.pdf`), nunca sobrescribiendo
 - `DELETE /api/materials/:id` — borra el PDF del disco (**PR-13**). Devuelve 204 si existe, 404 tipado (`{"_tag":"MaterialNotFound","materialId":"..."}`) si no. La ruta se resuelve por listing del repositorio, no por concatenación directa del id: path traversal imposible.
 - `GET /api/artifacts/` — lista artifacts
 - `GET /api/artifacts/:id` — obtiene un artifact
 - `POST /api/artifacts/:id/submit` — encadena crear intento + corregir
 
 **No hay endpoint de creación de artifacts**: crear artifacts solo se puede desde el agente.
+
+El upload consume el multipart **como stream** (`asMultipartStream`), no bufferizado, y
+`transport/http/upload.ts` escribe el temporal con un nombre propio. El motivo es
+concreto: el decodificador bufferizado persiste el temporal con el nombre original del
+cliente, así que un nombre con `: ? * " < > |` reventaba en Windows con un 500 antes de
+que el saneado pudiera actuar — medido con `Tema 1: variables.pdf` y `Que es?.pdf`. Con el
+stream, el nombre del cliente no toca nunca el sistema de ficheros: solo se usa, ya
+saneado, para elegir el nombre definitivo dentro del directorio de materiales. El
+directorio temporal se borra con `Effect.ensuring`, tanto si la subida acaba bien como si
+no.
 
 Los handlers de materiales usan `Effect.catchTag("MaterialRepositoryError", e => Effect.die(e))` para errores de infraestructura y `Effect.fail({...})` para errores de dominio tipados (404). Los demás handlers terminan en `Effect.orDie`: 500 sin canal tipado.
 
@@ -257,7 +268,7 @@ Los atoms que sí se usan son los de datos: `materialsQuery`, `artifactsQuery`,
 - `setInput("")` ocurre **antes** del primer `await` (en el mismo frame que `submit`), no tras el bucle.
 - El textarea queda `disabled` durante la generación (`aria-busy`), con cursor `not-allowed` y placeholder *"Waiting for the tutor…"*.
 - El botón conmuta entre `Send` (idle) y `Stop` (sending). `Stop` nunca va `disabled`.
-- Un aborto restaura el texto al textarea sin mostrar error.
+- Un aborto (`Stop`) **conserva** los mensajes ya recibidos, deja el textarea vacío y no ofrece `Retry`: la parada es deliberada, no un fallo. Un fallo real sí revierte. La decisión vive en `resolveStreamFailure` (`domain/tutor/stream.ts`), una función pura testeada; el turno detenido se marca con una línea *"Stopped"* bajo el último mensaje.
 - Un fallo deshace los mensajes parciales (vuelve al historial previo al envío) y restaura el texto. Si `canRetry` es `true`, aparece un botón `Retry`.
 - `Enter` envía; `Shift+Enter` inserta salto de línea. Guard de IME (`isComposing`).
 - Mientras `status === "sending"` y el último mensaje no es `assistant`, se muestra una burbuja de puntos animados (`animate-pulse`).
@@ -270,8 +281,11 @@ en estado local, `submit` vía `submitArtifactAttemptAction` en modo promesa, y 
 
 Gotcha de build: `vite.config.ts` tiene `root: "src"`, así que un directorio
 `src/api/` se serviría como estático y **taparía el proxy `^/api(?:/|$)`**. Por eso el
-cliente vive en `src/api-client/`. Y Tailwind no es plugin de Vite: `styles.generated.css`
-lo genera el CLI desde los scripts del paquete, y está en `.gitignore`.
+cliente vive en `src/api-client/`. Tailwind v4 sí es plugin de Vite
+(`@tailwindcss/vite`): `main.tsx` importa `styles.input.css` y no hay paso de CSS
+aparte. Antes lo generaba el CLI en un segundo proceso orquestado con `sh -c`, lo que
+rompía `pnpm run dev` en Windows (pnpm ejecuta los scripts con `cmd.exe`, que no tiene
+`sh`); el plugin elimina ese proceso.
 
 ---
 

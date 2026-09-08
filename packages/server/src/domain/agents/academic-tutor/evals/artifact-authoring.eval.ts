@@ -250,6 +250,8 @@ const InMemoryArtifactRepository = Layer.effect(
 
 const makeMaterialRepository = (materials: readonly MaterialFixture[]) => MaterialRepository.of({
   list: () => Effect.succeed(materials.map(toPdfMaterial)),
+  // The dataset is fixed: uploading is not part of what these evals exercise.
+  save: () => Effect.die("save is not supported by the eval material repository"),
   get: (id) => {
     const material = materials.find((candidate) => candidate.id === id);
     return material === undefined

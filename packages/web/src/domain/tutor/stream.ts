@@ -12,6 +12,21 @@ export interface StreamOptions {
 export const isAbortError = (cause: unknown): boolean =>
   cause instanceof DOMException && cause.name === "AbortError";
 
+export interface StreamFailureOutcome {
+  readonly keepMessages: boolean;
+  readonly restoreInput: boolean;
+  readonly showError: boolean;
+}
+
+// A stream ends early for two very different reasons, and they must not be handled the
+// same way. The user pressing Stop is a deliberate halt: whatever the tutor already said
+// is worth keeping, and the prompt was really sent. A failure is an interrupted turn:
+// roll back to the state before sending so the user can retry.
+export const resolveStreamFailure = (cause: unknown): StreamFailureOutcome =>
+  isAbortError(cause)
+    ? { keepMessages: true, restoreInput: false, showError: false }
+    : { keepMessages: false, restoreInput: true, showError: true };
+
 export async function* streamTutorMessage(
   input: TutorChatRequest,
   options?: StreamOptions

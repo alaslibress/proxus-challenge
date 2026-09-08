@@ -33,8 +33,16 @@ export class MaterialRepositoryError extends Data.TaggedError("MaterialRepositor
   readonly reason: unknown;
 }> {}
 
+export class InvalidPdf extends Data.TaggedError("InvalidPdf")<{
+  readonly message: string;
+}> {}
+
 export interface MaterialRepository {
   readonly list: () => Effect.Effect<readonly PdfMaterial[], MaterialRepositoryError>;
+  readonly save: (input: {
+    readonly fileName: string;
+    readonly path: string;
+  }) => Effect.Effect<PdfMaterial, InvalidPdf | MaterialRepositoryError>;
   readonly get: (id: string) => Effect.Effect<PdfMaterial, MaterialNotFound | MaterialRepositoryError>;
   readonly delete: (id: string) => Effect.Effect<void, MaterialNotFound | MaterialRepositoryError>;
   readonly renderPages: (
@@ -88,4 +96,42 @@ export const isMaterialPageImages = (value: unknown): value is MaterialPageImage
 
   const candidate = value as { readonly pages?: unknown };
   return Array.isArray(candidate.pages);
+};
+
+// The uploaded file name comes from the client, so it is a trust boundary: it may carry
+// directory components, or characters the filesystem refuses. The id and title of a
+// material are derived from this name, so it also has to stay readable.
+export const sanitizeFileName = (raw: string): string => {
+  // Own basename: Node's is platform specific, and on POSIX it would keep "..\evil.pdf"
+  // whole. Both separators are stripped here regardless of platform.
+  const withoutDirectory = raw.split(/[/\\]/).pop() ?? "";
+  const withoutExtension = withoutDirectory.replace(/\.pdf$/i, "");
+  const stem = withoutExtension
+    .replace(/[^A-Za-z0-9._ -]+/g, "-")
+    .replace(/-{2,}/g, "-")
+    .replace(/^[.\-\s]+|[.\-\s]+$/g, "");
+
+  return `${stem.length === 0 ? "material" : stem}.pdf`;
+};
+
+// Two materials cannot share a file name: the id is the file name without extension, and
+// `getFile` resolves by the first id that matches. Comparison is case insensitive because
+// on Windows "Doc.pdf" and "doc.pdf" are the same file, and overwriting one with the
+// other would lose the original.
+export const resolveFileNameCollision = (
+  name: string,
+  taken: ReadonlySet<string>
+): string => {
+  const isTaken = (candidate: string) => taken.has(candidate.toLowerCase());
+  if (!isTaken(name)) {
+    return name;
+  }
+
+  const stem = name.replace(/\.pdf$/i, "");
+  for (let suffix = 2; ; suffix += 1) {
+    const candidate = `${stem}-${suffix}.pdf`;
+    if (!isTaken(candidate)) {
+      return candidate;
+    }
+  }
 };
