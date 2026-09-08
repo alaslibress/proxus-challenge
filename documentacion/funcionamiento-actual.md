@@ -242,6 +242,7 @@ todo el color viene de tokens del design system. Ver `documentacion/design-syste
 **PR-13 (fix/tool-calls-estructural, sesión 8-sep-2026)**:
 - **Nombre del producto**: `My Favorite Teacher` (pestaña del navegador, logo M, sidebar). Los paquetes siguen siendo `@proxus/*`.
 - **Borrado de materiales**: cada fila del sidebar tiene un botón `×` (siempre visible). El primer clic cambia a `Confirm`; el segundo borra. `Escape` o un clic fuera cancelan. La fila queda a `opacity-50` mientras la petición está en vuelo. Un error se muestra bajo la lista en `text-danger`.
+- **Subida de PDFs**: `PdfUploader` aparece siempre al final de la sección de materiales, independientemente de cuántos PDFs haya ya. (Fix 95e1ef6 — la reescritura del PR-13 lo había eliminado accidentalmente.)
 - **Cerrar artefacto**: `ArtifactWorkspace` tiene un botón `Close` en una cabecera *sticky*. `Escape` también cierra (excepto si el foco está en un `<input>` o `<textarea>`). Pulsar de nuevo el artefacto seleccionado en el sidebar lo cierra (toggle). La conversación del chat no se pierde.
 - `deleteMaterialAction` usa `apiRuntime.fn` con `reactivityKeys: ["materials"]` — el mismo patrón que `submitArtifactAttemptAction`.
 
