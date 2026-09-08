@@ -256,6 +256,12 @@ const makeMaterialRepository = (materials: readonly MaterialFixture[]) => Materi
       ? Effect.fail(new MaterialNotFound({ materialId: id }))
       : Effect.succeed(toPdfMaterial(material));
   },
+  delete: (id) => {
+    const material = materials.find((candidate) => candidate.id === id);
+    return material === undefined
+      ? Effect.fail(new MaterialNotFound({ materialId: id }))
+      : Effect.void;
+  },
   renderPages: (id, pages) => {
     const material = materials.find((candidate) => candidate.id === id);
     if (material === undefined) {
@@ -402,7 +408,7 @@ const runEvalCase = (
 ) => Effect.gen(function* () {
   const materialRepository = yield* MaterialRepository;
   const artifactRepository = yield* ArtifactRepository;
-  const harness = makeAcademicTutorHarness(materialRepository, artifactRepository);
+  const harness = makeAcademicTutorHarness(materialRepository, artifactRepository, "No PDF materials have been uploaded yet.");
   const session = AgentSession.make(harness);
   const result = yield* session.run({
     input: testCase.input,

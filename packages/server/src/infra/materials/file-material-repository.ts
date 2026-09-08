@@ -69,6 +69,14 @@ export const FileMaterialRepository = {
       Effect.map((file) => file.material)
     );
 
+    const deleteMaterial = (id: string): Effect.Effect<void, MaterialNotFound | MaterialRepositoryError> =>
+      Effect.gen(function* () {
+        // Resolve path via repository listing — never by concatenating the raw id.
+        // This prevents path traversal (e.g. id = "../../etc/passwd").
+        const file = yield* getFile(id);
+        yield* fs.remove(file.path).pipe(Effect.mapError(mapError));
+      });
+
     const renderPages = (
       id: string,
       pages: readonly number[]
@@ -92,7 +100,7 @@ export const FileMaterialRepository = {
       };
     });
 
-    return { list, get, renderPages };
+    return { list, get, delete: deleteMaterial, renderPages };
   }),
   layer: (directory: string) => Layer.effect(MaterialRepository)(FileMaterialRepository.make(directory))
 };

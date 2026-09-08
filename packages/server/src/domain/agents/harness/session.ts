@@ -92,15 +92,34 @@ function execute(
         })
       );
 
+      yield* Effect.log("agent.step").pipe(
+        Effect.annotateLogs({
+          step,
+          maxSteps,
+          toolCalls: response.toolCalls.map((c) => c.name),
+          toolResults: response.toolResults.length,
+          textPreview: response.text.slice(0, 200)
+        })
+      );
+
       for (const toolCall of response.toolCalls) {
-        yield* appendMessage(AgentMessage.toolCall(toolCall.name, toolCall.params));
+        yield* appendMessage(AgentMessage.toolCall(toolCall.name, toolCall.params, toolCall.id));
       }
 
       for (const toolResult of response.toolResults) {
         yield* appendMessage(AgentMessage.toolResult(toolResult.name, toolResult.result, toolResult.isFailure));
       }
 
-      if (response.toolResults.length === 0) {
+        if (response.toolResults.length === 0) {
+        if (response.text.length === 0 && response.toolCalls.length === 0) {
+          // Adapter bailed (MALFORMED_FUNCTION_CALL, no recovery). Continue loop with
+          // synthetic user message so the model can answer with what it already knows.
+          // Not emitted to client — newMessages.push bypasses emit intentionally.
+          newMessages.push(AgentMessage.user(
+            "The tool call could not be completed. Answer the user now, in their language, using only what you already know from this conversation. Say plainly what you could not do."
+          ));
+          continue;
+        }
         const output = response.text.length > 0 ? response.text : lastToolResult;
         yield* appendMessage(AgentMessage.assistant(output));
         return {
@@ -141,62 +160,83 @@ const formatAgentError = (error: unknown) => {
   return String(error);
 };
 
+// Tool-call and tool-result IDs are synthesised by position: the n-th tool-call and the
+// n-th tool-result share `call_${n}`. Valid while tool calls are strictly sequential (one
+// per turn). If parallel tool calls are ever added, this pairing is the first thing to break.
 const renderPrompt = (
   systemPrompt: string,
   messages: readonly AgentMessageType[]
-): readonly Prompt.MessageEncoded[] => [
-  {
-    role: "system",
-    content: systemPrompt
-  },
-  ...messages.map(renderMessage)
-];
+): readonly Prompt.MessageEncoded[] => {
+  const result: Prompt.MessageEncoded[] = [{ role: "system", content: systemPrompt }];
+  let callIndex = 0;
+  let resultIndex = 0;
 
-const renderMessage = (message: AgentMessageType): Prompt.MessageEncoded => {
-  switch (message.role) {
-    case "user":
-      return {
-        role: "user",
-        content: message.content
-      };
-    case "assistant":
-      return {
-        role: "assistant",
-        content: message.content
-      };
-    case "tool-call":
-      return {
-        role: "assistant",
-        content: `Tool call ${message.name}: ${JSON.stringify(message.input)}`
-      };
-    case "tool-result":
-      if (!message.isFailure && isMaterialPageImages(message.result)) {
-        const result = message.result;
-        return {
-          role: "user",
-          content: [
-            {
-              type: "text",
-              text: `Tool result ${message.name}: rendered pages ${result.pages.map((page) => page.page).join(", ")} from ${result.material.title}.`
-            },
-            ...result.pages.map((page) => ({
-              type: "file" as const,
-              mediaType: page.mediaType,
-              data: page.data,
-              fileName: `${result.material.id}-page-${page.page}.png`
-            }))
-          ]
-        };
+  for (const message of messages) {
+    switch (message.role) {
+      case "user":
+        result.push({ role: "user", content: message.content });
+        break;
+      case "assistant":
+        result.push({ role: "assistant", content: message.content });
+        break;
+      case "tool-call": {
+        const id = message.id ?? `call_${callIndex}`;
+        callIndex++;
+        result.push({
+          role: "assistant",
+          content: [{ type: "tool-call", id, name: message.name, params: message.input as Record<string, unknown> }]
+        } as unknown as Prompt.MessageEncoded);
+        break;
       }
-
-      return {
-        role: "user",
-        content: `Tool result ${message.name}${message.isFailure ? " failure" : ""}: ${formatToolResult(message.result)}`
-      };
+      case "tool-result": {
+        const id = `call_${resultIndex++}`;
+        if (!message.isFailure && isMaterialPageImages(message.result)) {
+          const res = message.result;
+          // ToolMessageEncoded only admits tool-result parts, not file parts.
+          // Emit text summary as tool message and images as a separate user message.
+          result.push({
+            role: "tool",
+            content: [{
+              type: "tool-result",
+              id,
+              name: message.name,
+              isFailure: false,
+              result: `rendered pages ${res.pages.map((p) => p.page).join(", ")} from ${res.material.title}.`
+            }]
+          } as unknown as Prompt.MessageEncoded);
+          result.push({
+            role: "user",
+            content: [
+              { type: "text", text: `Rendered pages from ${res.material.title}:` },
+              ...res.pages.map((page) => ({
+                type: "file" as const,
+                mediaType: page.mediaType,
+                data: page.data,
+                fileName: `${res.material.id}-page-${page.page}.png`
+              }))
+            ]
+          });
+        } else {
+          result.push({
+            role: "tool",
+            content: [{
+              type: "tool-result",
+              id,
+              name: message.name,
+              isFailure: message.isFailure,
+              result: formatToolResult(message.result)
+            }]
+          } as unknown as Prompt.MessageEncoded);
+        }
+        break;
+      }
+    }
   }
+
+  return result;
 };
 
-const formatToolResult = (result: unknown) => {
+export const formatToolResult = (result: unknown) => {
   if (typeof result === "string") {
     return result;
   }

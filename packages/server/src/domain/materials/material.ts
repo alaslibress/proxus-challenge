@@ -36,6 +36,7 @@ export class MaterialRepositoryError extends Data.TaggedError("MaterialRepositor
 export interface MaterialRepository {
   readonly list: () => Effect.Effect<readonly PdfMaterial[], MaterialRepositoryError>;
   readonly get: (id: string) => Effect.Effect<PdfMaterial, MaterialNotFound | MaterialRepositoryError>;
+  readonly delete: (id: string) => Effect.Effect<void, MaterialNotFound | MaterialRepositoryError>;
   readonly renderPages: (
     id: string,
     pages: readonly number[]
