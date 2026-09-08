@@ -35,7 +35,7 @@ export const MaterialsHttpHandlers = HttpApiBuilder.group(
           Effect.catchTag("MaterialNotFound", (e) =>
             Effect.fail({ _tag: "MaterialNotFound" as const, materialId: e.materialId })
           ),
-          Effect.orDie
+          Effect.catchTag("MaterialRepositoryError", (e) => Effect.die(e))
         )
       );
   })
