@@ -1,6 +1,7 @@
 import { Schema } from "effect";
 import { TutorChatStreamEvent, type TutorChatRequest, type TutorChatStreamEvent as TutorChatStreamEventType } from "@proxus/shared";
 import { apiClientConfig } from "../../api-client/config.ts";
+import { readNdjson } from "../../lib/ndjson.ts";
 
 const TutorChatStreamEventFromJsonString = Schema.fromJsonString(TutorChatStreamEvent);
 const decodeEvent = Schema.decodeUnknownSync(TutorChatStreamEventFromJsonString);
@@ -51,40 +52,5 @@ export async function* streamTutorMessage(
     );
   }
 
-  if (response.body === null) {
-    throw new Error("Tutor stream response did not include a body");
-  }
-
-  const reader = response.body.getReader();
-  const decoder = new TextDecoder();
-  let buffer = "";
-
-  try {
-    while (true) {
-      const { value, done } = await reader.read();
-
-      if (done) {
-        break;
-      }
-
-      buffer += decoder.decode(value, { stream: true });
-      const lines = buffer.split("\n");
-      buffer = lines.pop() ?? "";
-
-      for (const line of lines) {
-        const trimmed = line.trim();
-        if (trimmed.length > 0) {
-          yield decodeEvent(trimmed);
-        }
-      }
-    }
-
-    buffer += decoder.decode();
-    const remaining = buffer.trim();
-    if (remaining.length > 0) {
-      yield decodeEvent(remaining);
-    }
-  } finally {
-    await reader.cancel().catch(() => {});
-  }
+  yield* readNdjson(response, decodeEvent);
 }

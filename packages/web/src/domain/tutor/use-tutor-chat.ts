@@ -52,12 +52,21 @@ export const useTutorChat = (): TutorChatState => {
     setInput("");
     pendingInvalidations.current = [];
 
+    let sawDone = false;
+
     try {
       for await (const event of streamTutorMessage(
         { input: prompt, messages: history },
         { signal: controller.signal }
       )) {
-        if (event.type === "done") continue;
+        if (event.type !== "message") {
+          if (event.type === "done") {
+            sawDone = true;
+          } else {
+            console.debug("tutor chat: ignoring unknown stream frame", event);
+          }
+          continue;
+        }
 
         const message = event.message;
         setMessages((current) => [...current, message]);
@@ -74,7 +83,14 @@ export const useTutorChat = (): TutorChatState => {
         }
       }
 
-      lastAttempt.current = undefined;
+      if (sawDone) {
+        lastAttempt.current = undefined;
+      } else if (controller.signal.aborted === false) {
+        // The connection ended without a terminal "done" frame: the turn is incomplete,
+        // not aborted. Keep whatever arrived, surface an error, and leave lastAttempt
+        // set so the user can retry.
+        setError("The tutor stopped responding before finishing. Try again.");
+      }
     } catch (cause) {
       const outcome = resolveStreamFailure(cause);
       if (outcome.keepMessages) {
