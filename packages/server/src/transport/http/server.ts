@@ -7,6 +7,7 @@ import { LanguageModel } from "effect/unstable/ai";
 import { ProxusApi, TutorChatRequest, TutorChatStreamEvent } from "@proxus/shared";
 import { GeminiModel } from "../../domain/agents/gemini.ts";
 import { TutorChatService, TutorChatServiceLive } from "../../domain/agents/academic-tutor/tutor-chat-service.ts";
+import { EvaluationEngineServiceLive } from "../../domain/evaluation/engine.ts";
 import { FileArtifactRepository } from "../../infra/artifacts/file-artifact-repository.ts";
 import { FileMaterialRepository } from "../../infra/materials/file-material-repository.ts";
 import { PopplerPdfService } from "../../infra/materials/poppler-pdf-service.ts";
@@ -51,6 +52,7 @@ const Routes = Layer.mergeAll(ApiRoutes, DocsRoute, TutorStreamRoute);
 
 const DomainLive = Layer.mergeAll(
   TutorChatServiceLive,
+  EvaluationEngineServiceLive,
   GeminiModel
 );
 
