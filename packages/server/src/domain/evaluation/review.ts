@@ -12,6 +12,7 @@ import type {
 import type { PageText } from "../materials/material.ts";
 import { MaterialRepository } from "../materials/material.ts";
 import { EvaluationEngineService } from "./engine.ts";
+import { EvaluationTrace, type EvaluationTraceEntry } from "./trace.ts";
 
 const findTestQuestion = (
   artifact: Artifact,
@@ -31,15 +32,49 @@ const evidenceForQuestion = (
   return source.pages;
 };
 
+// Cuando el panel nunca llega a llamarse por falta de evidencia, se registra igual: un
+// log que solo cuenta los éxitos no sirve para auditar (plan PR-06, paso 5).
+const noEvidenceTraceEntry = (params: {
+  readonly attemptId: string;
+  readonly artifactId: string;
+  readonly questionId: string;
+  readonly questionPrompt: string;
+  readonly expectedAnswer: string;
+  readonly studentAnswer: string;
+  readonly materialId: string | undefined;
+  readonly pages: readonly number[];
+  readonly score: number;
+  readonly reason: string;
+}): EvaluationTraceEntry => ({
+  attemptId: params.attemptId,
+  artifactId: params.artifactId,
+  questionId: params.questionId,
+  questionPrompt: params.questionPrompt,
+  expectedAnswer: params.expectedAnswer,
+  studentAnswer: params.studentAnswer,
+  materialId: params.materialId,
+  pages: params.pages,
+  evidence: [],
+  goodTeacher: { ok: false, reason: params.reason },
+  badTeacher: { ok: false, reason: params.reason },
+  judge: { failed: params.reason },
+  citations: [],
+  deterministicScore: params.score,
+  finalScore: params.score,
+  scoreOverridden: false,
+  durationMs: 0
+});
+
 const reviewCorrection = (
   artifact: Artifact,
+  attemptId: string,
   correction: ShortAnswerCorrection,
   studentAnswer: string,
   emit?: (stage: AttemptEvaluationStage) => Effect.Effect<void>
 ): Effect.Effect<
   ShortAnswerCorrection,
   never,
-  EvaluationEngineService | MaterialRepository | LanguageModel.LanguageModel
+  EvaluationEngineService | MaterialRepository | LanguageModel.LanguageModel | EvaluationTrace
 > => Effect.gen(function* () {
   const question = findTestQuestion(artifact, correction.questionId);
   if (question === undefined || question.type !== "short-answer") {
@@ -56,6 +91,7 @@ const reviewCorrection = (
     return correction;
   }
 
+  const trace = yield* EvaluationTrace;
   const materialRepository = yield* MaterialRepository;
 
   const pageTexts: readonly PageText[] | undefined = yield* materialRepository
@@ -66,40 +102,80 @@ const reviewCorrection = (
     );
 
   if (pageTexts === undefined) {
+    yield* trace.record(noEvidenceTraceEntry({
+      attemptId,
+      artifactId: artifact.id,
+      questionId: correction.questionId,
+      questionPrompt: question.prompt,
+      expectedAnswer: question.expectedAnswer,
+      studentAnswer,
+      materialId,
+      pages,
+      score: correction.score,
+      reason: "No se pudo extraer el texto del material."
+    }));
     return correction;
   }
 
   const nonEmptyPages = pageTexts.filter((page) => page.text.trim().length > 0);
   if (nonEmptyPages.length === 0) {
+    yield* trace.record(noEvidenceTraceEntry({
+      attemptId,
+      artifactId: artifact.id,
+      questionId: correction.questionId,
+      questionPrompt: question.prompt,
+      expectedAnswer: question.expectedAnswer,
+      studentAnswer,
+      materialId,
+      pages,
+      score: correction.score,
+      reason: "El texto extraído de las páginas estaba vacío (sin capa de texto)."
+    }));
     return correction;
   }
 
   const engine = yield* EvaluationEngineService;
 
-  const review = yield* engine.evaluate({
+  const outcome = yield* engine.evaluate({
+    questionId: correction.questionId,
     questionPrompt: question.prompt,
     expectedAnswer: question.expectedAnswer,
     studentAnswer,
     materialId,
+    pages,
     evidence: nonEmptyPages
   }, emit).pipe(
     Effect.match({
-      onFailure: () => undefined,
-      onSuccess: (value) => value
+      onFailure: (error) => ({ review: undefined, trace: error.trace }),
+      onSuccess: (value) => ({ review: value.feedback, trace: value.trace })
     })
   );
 
-  if (review === undefined) {
+  const deterministicScore = correction.score;
+  const hasVerifiedCitation = outcome.review !== undefined
+    && outcome.review.citas_pdf.some((citation) => citation.verified);
+  const finalScore = outcome.review !== undefined && hasVerifiedCitation && outcome.review.is_correct
+    ? question.maxScore
+    : deterministicScore;
+  const scoreOverridden = finalScore !== deterministicScore;
+
+  yield* trace.record({
+    ...outcome.trace,
+    attemptId,
+    artifactId: artifact.id,
+    deterministicScore,
+    finalScore,
+    scoreOverridden
+  });
+
+  if (outcome.review === undefined) {
     return correction;
   }
 
-  const hasVerifiedCitation = review.citas_pdf.some((citation) => citation.verified);
-  const score = hasVerifiedCitation && review.is_correct ? question.maxScore : correction.score;
-
   return {
     ...correction,
-    score,
-    review
+    score: finalScore,
+    review: outcome.review
   };
 });
 
@@ -109,7 +185,7 @@ export const reviewGradedAttempt = (
 ): Effect.Effect<
   ArtifactAttempt,
   never,
-  EvaluationEngineService | MaterialRepository | LanguageModel.LanguageModel
+  EvaluationEngineService | MaterialRepository | LanguageModel.LanguageModel | EvaluationTrace
 > => Effect.gen(function* () {
   if (attempt.status !== "graded" || attempt.artifactKind !== "test") {
     return attempt;
@@ -117,7 +193,7 @@ export const reviewGradedAttempt = (
 
   const reviewOne = (
     correction: QuestionCorrection
-  ): Effect.Effect<QuestionCorrection, never, EvaluationEngineService | MaterialRepository | LanguageModel.LanguageModel> => {
+  ): Effect.Effect<QuestionCorrection, never, EvaluationEngineService | MaterialRepository | LanguageModel.LanguageModel | EvaluationTrace> => {
     if (correction.questionType !== "short-answer") {
       return Effect.succeed(correction);
     }
@@ -127,7 +203,7 @@ export const reviewGradedAttempt = (
     );
 
     return answer !== undefined && answer.questionType === "short-answer"
-      ? reviewCorrection(artifact, correction, answer.answer)
+      ? reviewCorrection(artifact, attempt.id, correction, answer.answer)
       : Effect.succeed(correction);
   };
 
@@ -143,7 +219,7 @@ const executeStreaming = (
   artifact: Artifact,
   attempt: ArtifactAttempt,
   emit: (event: AttemptStreamEvent) => Effect.Effect<void>
-): Effect.Effect<void, never, EvaluationEngineService | MaterialRepository | LanguageModel.LanguageModel> =>
+): Effect.Effect<void, never, EvaluationEngineService | MaterialRepository | LanguageModel.LanguageModel | EvaluationTrace> =>
   Effect.gen(function* () {
     if (attempt.status !== "graded" || attempt.artifactKind !== "test") {
       yield* emit({ type: "done", payload: attempt });
@@ -166,7 +242,7 @@ const executeStreaming = (
 
     const reviewOne = (
       correction: QuestionCorrection
-    ): Effect.Effect<QuestionCorrection, never, EvaluationEngineService | MaterialRepository | LanguageModel.LanguageModel> => {
+    ): Effect.Effect<QuestionCorrection, never, EvaluationEngineService | MaterialRepository | LanguageModel.LanguageModel | EvaluationTrace> => {
       if (correction.questionType !== "short-answer") {
         return Effect.succeed(correction);
       }
@@ -188,7 +264,7 @@ const executeStreaming = (
         questionTotal: total
       });
 
-      return reviewCorrection(artifact, correction, answer.answer, stageEmit);
+      return reviewCorrection(artifact, attempt.id, correction, answer.answer, stageEmit);
     };
 
     const corrections: QuestionCorrection[] = yield* Effect.forEach(attempt.corrections, reviewOne);
@@ -199,8 +275,8 @@ const executeStreaming = (
 export const reviewGradedAttemptStreaming = (
   artifact: Artifact,
   attempt: ArtifactAttempt
-): Stream.Stream<AttemptStreamEvent, never, EvaluationEngineService | MaterialRepository | LanguageModel.LanguageModel> =>
-  Stream.callback<AttemptStreamEvent, never, EvaluationEngineService | MaterialRepository | LanguageModel.LanguageModel>(
+): Stream.Stream<AttemptStreamEvent, never, EvaluationEngineService | MaterialRepository | LanguageModel.LanguageModel | EvaluationTrace> =>
+  Stream.callback<AttemptStreamEvent, never, EvaluationEngineService | MaterialRepository | LanguageModel.LanguageModel | EvaluationTrace>(
     (queue) =>
       executeStreaming(artifact, attempt, (event) => Queue.offer(queue, event).pipe(Effect.asVoid)).pipe(
         Effect.andThen(Queue.end(queue)),

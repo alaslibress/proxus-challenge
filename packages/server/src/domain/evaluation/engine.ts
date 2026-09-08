@@ -3,6 +3,7 @@ import { LanguageModel } from "effect/unstable/ai";
 import { FinalFeedbackSchema, type AttemptEvaluationStage, type EnrichedFeedbackSchema } from "@proxus/shared";
 import { verifyCitations } from "../materials/citation.ts";
 import { EvaluationUnavailable, type EvaluationError } from "./errors.ts";
+import type { EvaluationTraceDraft } from "./trace.ts";
 import {
   goodTeacherPrompt,
   badTeacherPrompt,
@@ -17,11 +18,19 @@ export type { EvaluationInput } from "./prompts.ts";
 
 const TEACHER_TIMEOUT_MS = 20_000;
 
+/** Lo que devuelve `evaluate`: el veredicto que consume la UI, y el borrador de traza
+ * con todo lo que el motor sabe y `review.ts` no puede reconstruir (texto de cada profe
+ * o su motivo de fallo, JSON crudo del Juez). */
+export interface EvaluationResult {
+  readonly feedback: EnrichedFeedbackSchema;
+  readonly trace: EvaluationTraceDraft;
+}
+
 export interface EvaluationEngineService {
   readonly evaluate: (
     input: EvaluationInput,
     emit?: (stage: AttemptEvaluationStage) => Effect.Effect<void>
-  ) => Effect.Effect<EnrichedFeedbackSchema, EvaluationError, LanguageModel.LanguageModel>;
+  ) => Effect.Effect<EvaluationResult, EvaluationError, LanguageModel.LanguageModel>;
 }
 
 export const EvaluationEngineService = Context.Service<EvaluationEngineService>(
@@ -39,11 +48,24 @@ const runTeacher = (systemPrompt: string, userPrompt: string) =>
     Effect.timeout(TEACHER_TIMEOUT_MS)
   );
 
+type TeacherResult =
+  | { readonly _tag: "Success"; readonly success: { readonly text: string } }
+  | { readonly _tag: "Failure"; readonly failure: unknown };
+
+const teacherOutcome = (
+  result: TeacherResult
+): { readonly ok: true; readonly text: string } | { readonly ok: false; readonly reason: string } =>
+  result._tag === "Success"
+    ? { ok: true, text: result.success.text }
+    : { ok: false, reason: String(result.failure) };
+
 const evaluate = (
   input: EvaluationInput,
   emit?: (stage: AttemptEvaluationStage) => Effect.Effect<void>
-): Effect.Effect<EnrichedFeedbackSchema, EvaluationError, LanguageModel.LanguageModel> =>
+): Effect.Effect<EvaluationResult, EvaluationError, LanguageModel.LanguageModel> =>
   Effect.gen(function* () {
+    const startedAt = Date.now();
+
     if (emit !== undefined) {
       yield* emit("evaluating_good");
       yield* emit("evaluating_bad");
@@ -59,12 +81,26 @@ const evaluate = (
 
     const good = goodResult._tag === "Success" ? goodResult.success.text : null;
     const bad = badResult._tag === "Success" ? badResult.success.text : null;
+    const goodTeacher = teacherOutcome(goodResult);
+    const badTeacher = teacherOutcome(badResult);
 
     if (emit !== undefined) {
       yield* emit("deliberating");
     }
 
-    const judgeResult = yield* LanguageModel.generateObject({
+    const traceBase = {
+      questionId: input.questionId,
+      questionPrompt: input.questionPrompt,
+      expectedAnswer: input.expectedAnswer,
+      studentAnswer: input.studentAnswer,
+      materialId: input.materialId,
+      pages: input.pages,
+      evidence: input.evidence,
+      goodTeacher,
+      badTeacher
+    };
+
+    const judgeOutcome = yield* LanguageModel.generateObject({
       prompt: [
         { role: "system" as const, content: JUDGE_SYSTEM_PROMPT },
         { role: "user" as const, content: judgePrompt(input, { good, bad }) }
@@ -72,15 +108,41 @@ const evaluate = (
       schema: FinalFeedbackSchema,
       objectName: "final_feedback"
     }).pipe(
-      Effect.mapError((reason) => new EvaluationUnavailable({ reason, stage: "judge" }))
+      Effect.match({
+        onFailure: (reason) => ({ ok: false as const, reason }),
+        onSuccess: (result) => ({ ok: true as const, value: result.value })
+      })
     );
 
-    const citas_pdf = verifyCitations(judgeResult.value.citas_pdf, input.evidence, input.materialId);
+    const durationMs = Date.now() - startedAt;
+
+    if (!judgeOutcome.ok) {
+      return yield* new EvaluationUnavailable({
+        reason: judgeOutcome.reason,
+        stage: "judge",
+        trace: {
+          ...traceBase,
+          judge: { failed: String(judgeOutcome.reason) },
+          citations: [],
+          durationMs
+        }
+      });
+    }
+
+    const citas_pdf = verifyCitations(judgeOutcome.value.citas_pdf, input.evidence, input.materialId);
 
     return {
-      is_correct: judgeResult.value.is_correct,
-      feedback: judgeResult.value.feedback,
-      citas_pdf
+      feedback: {
+        is_correct: judgeOutcome.value.is_correct,
+        feedback: judgeOutcome.value.feedback,
+        citas_pdf
+      },
+      trace: {
+        ...traceBase,
+        judge: judgeOutcome.value,
+        citations: citas_pdf,
+        durationMs
+      }
     };
   });
 
