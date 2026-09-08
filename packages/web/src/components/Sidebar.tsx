@@ -1,8 +1,9 @@
-import { useAtomSet, useAtomValue } from "@effect/atom-react";
+import { useAtomRefresh, useAtomSet, useAtomValue } from "@effect/atom-react";
 import { useEffect, useRef, useState } from "react";
 import * as AsyncResult from "effect/unstable/reactivity/AsyncResult";
 import { artifactsQuery } from "../domain/artifacts/atoms.ts";
 import { deleteMaterialAction, materialsQuery } from "../domain/materials/atoms.ts";
+import { PdfUploader } from "./PdfUploader.tsx";
 import type { PdfMaterial } from "@proxus/shared";
 
 interface SidebarProps {
@@ -190,6 +191,7 @@ function MaterialRow({ material }: { readonly material: PdfMaterial }) {
 export function Sidebar({ selectedArtifactId, onSelectArtifact }: SidebarProps) {
   const materials = useAtomValue(materialsQuery);
   const artifacts = useAtomValue(artifactsQuery);
+  const refreshMaterials = useAtomRefresh(materialsQuery);
 
   return (
     <aside
@@ -249,6 +251,7 @@ export function Sidebar({ selectedArtifactId, onSelectArtifact }: SidebarProps) 
                   </ul>
                 ),
         })}
+        <PdfUploader onUploaded={refreshMaterials} />
       </section>
 
       {/* Sección de artifacts */}
