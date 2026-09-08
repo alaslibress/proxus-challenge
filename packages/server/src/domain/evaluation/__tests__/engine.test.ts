@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { Data, Effect, Layer } from "effect";
-import { LanguageModel } from "effect/unstable/ai";
+import { AiError, LanguageModel } from "effect/unstable/ai";
 import { EvaluationEngineService, EvaluationEngineServiceLive, type EvaluationInput } from "../engine.ts";
 
 class FakeModelError extends Data.TaggedError("FakeModelError")<{ readonly reason: string }> {}
@@ -20,6 +20,8 @@ const makeFakeLanguageModel = (options: {
   readonly failBad?: boolean;
   readonly judgeValue?: { readonly is_correct: boolean; readonly feedback: string; readonly citas_pdf: readonly string[] };
   readonly failJudge?: boolean;
+  /** El Juez devolvió texto que no decodifica contra FinalFeedbackSchema (PR-08). */
+  readonly failJudgeWithMalformedJson?: boolean;
   readonly onGenerateText?: (systemPrompt: string) => void;
 }) =>
   Layer.succeed(LanguageModel.LanguageModel)({
@@ -37,6 +39,16 @@ const makeFakeLanguageModel = (options: {
       return Effect.succeed(textResponse(text));
     }) as unknown as LanguageModel.Service["generateText"],
     generateObject: (() => {
+      if (options.failJudgeWithMalformedJson === true) {
+        // Es exactamente lo que produce generateObject cuando el modelo devuelve JSON que
+        // no cumple el schema: Schema.fromJsonString falla y sale un StructuredOutputError.
+        return Effect.fail(
+          new AiError.StructuredOutputError({
+            description: "Expected a valid FinalFeedback object",
+            responseText: '{"is_correct": true, "feedback":'
+          })
+        );
+      }
       if (options.failJudge === true) {
         return Effect.fail(new FakeModelError({ reason: "judge failed" }));
       }
@@ -140,6 +152,24 @@ describe("EvaluationEngineService.evaluate", () => {
 
     expect(error._tag).toBe("EvaluationUnavailable");
     expect((error as { readonly stage: string }).stage).toBe("judge");
+  });
+
+  it("rejects malformed JSON from the judge as EvaluationUnavailable, without taking the server down", async () => {
+    const model = makeFakeLanguageModel({ failJudgeWithMalformedJson: true });
+
+    const error = await Effect.runPromise(runEvaluate(baseInput, model).pipe(Effect.flip));
+
+    expect(error._tag).toBe("EvaluationUnavailable");
+    expect((error as { readonly stage: string }).stage).toBe("judge");
+    // La traza conserva a los dos profes y deja constancia del fallo del Juez.
+    const trace = (error as {
+      readonly trace: {
+        readonly judge: { readonly failed?: string };
+        readonly citations: readonly unknown[];
+      };
+    }).trace;
+    expect(trace.judge.failed).toContain("StructuredOutputError");
+    expect(trace.citations).toEqual([]);
   });
 
   it("returns an empty citas_pdf array unchanged when the judge cites nothing", async () => {

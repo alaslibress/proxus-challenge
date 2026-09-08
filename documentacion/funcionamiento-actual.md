@@ -356,19 +356,42 @@ rompía `pnpm run dev` en Windows (pnpm ejecuta los scripts con `cmd.exe`, que n
 
 ## 8. Evals
 
-No hay framework: `evals/artifact-authoring.eval.ts` (473 líneas) es un script Effect a
-mano que se ejecuta con `pnpm --filter @proxus/server run eval:tutor:artifact-authoring`
-y sale con código distinto de cero si falla algún caso. **No hay flag para ejecutar un
-solo caso**: hay que filtrar `dataset.cases` en el fichero.
+Hay **dos niveles**, y sólo el segundo cuesta dinero.
 
-Usa repositorios en memoria con ids deterministas, pero **llama a Gemini de verdad**: no
-existe un `LanguageModel` falso. Tres criterios, todos obligatorios: que se cree el
-artifact esperado con el número de preguntas esperado, que la respuesta lo mencione
-(regex bilingüe y deliberadamente laxa) y que no haya tool results fallidos.
+### 8.1 Suite determinista con vitest (sin API key, sin red)
 
-Los tres casos del dataset **no usan materiales**. El schema de fixture ya contempla
-`pages: {page, text}[]`, pero el repositorio falso codifica ese texto en base64 y lo
-hace pasar por un PNG: finge el canal de imagen porque no hay canal de texto.
+`vitest ^5.0.0` es devDependency de `packages/server` y de `packages/web`, cada uno con su
+`vitest.config.ts` (`environment: "node"`, `include: ["src/**/*.test.ts"]`) y sus scripts
+`test` / `test:watch`. Desde la raíz: `pnpm run test` (alias de `pnpm -r test`). Hoy son
+**15 ficheros y 137 tests**, todos deterministas y sin ninguna llamada de red.
+
+El modelo falso vive aquí: `domain/evaluation/__tests__/engine.test.ts:16-51`
+(`makeFakeLanguageModel`, con `generateText`, `generateObject`, `streamText` y fallos
+guionizados por rol), y el `MaterialRepository` de fixtures en `review.test.ts:29-53`.
+Cubren el motor de evaluación, la verificación de citas, la traza, el purgado de schemas
+para Gemini, el lector NDJSON del navegador y el stream de evaluación.
+
+Lo que **no** miden: la calidad de los prompts. Garantizan que ante una respuesta X del
+Juez el sistema hace Y; para saber si el Juez es bueno hay que ir al nivel 2.
+
+### 8.2 Eval con LLM real (requiere API key)
+
+`evals/artifact-authoring.eval.ts` (504 líneas) es un script Effect a mano que se ejecuta
+con `pnpm --filter @proxus/server run eval:tutor:artifact-authoring` y sale con código
+distinto de cero si falla algún caso. **No hay flag para ejecutar un solo caso**: hay que
+filtrar `dataset.cases` en el fichero.
+
+Usa repositorios en memoria con ids deterministas, pero **llama a Gemini de verdad**
+(`makeEvalLayer` mete `GeminiModel` en `:319-322`): **esta eval concreta no usa modelo
+falso**; el modelo falso vive en la suite vitest (`engine.test.ts:16-51`). Tres criterios,
+todos obligatorios: que se cree el artifact esperado con el número de preguntas esperado,
+que la respuesta lo mencione (regex bilingüe y deliberadamente laxa) y que no haya tool
+results fallidos.
+
+Los tres casos del dataset **no usan materiales**. Su repositorio falso **sí** tiene canal
+de texto: `extractText` lee `MaterialPageFixture.text` (`:289-303`). El disfraz PNG afecta
+**sólo a `renderPages`** (`:268-283`), que codifica ese mismo texto en base64 y lo hace
+pasar por una imagen porque el canal de render espera un PNG.
 
 ---
 

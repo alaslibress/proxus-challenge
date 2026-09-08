@@ -63,10 +63,15 @@ El id del material es el nombre del fichero sin `.pdf`.
 
 ### El gate
 
-No hay test runner. No hay eslint. El gate es:
+No hay eslint. **Sí hay test runner**, y no lo trajo ningún PR de esta serie: vitest entró
+en el commit `03a8d80` *"test: add unit test suite with vitest (22 tests, all passing)"*,
+**anterior** a PR-03 (`cd8d136`) y a PR-04 (`564406e`). Hoy: `vitest ^5.0.0` en `packages/server`
+(`package.json:16-17`, `vitest.config.ts`) y en `packages/web` (`package.json:11-12`).
+Hoy son 11 ficheros y 91 tests, todos deterministas y **sin API key**. El gate es:
 
 ```bash
 pnpm run typecheck                    # obligatorio, no negociable
+pnpm -r test                          # sin API key ni red
 pnpm --filter @proxus/web run build
 ```
 
@@ -224,8 +229,12 @@ Scripts que **crean** los planes, cada uno en el suyo:
 |--------|----|
 | `structured-output:check` | 03 |
 | `panel:check` | 04 |
-| `eval:pure` | 08 — sin API key |
-| `eval:panel` | 08 — sin API key |
+| `test` (raíz, `pnpm -r test`) | 08 — sin API key |
+
+Los scripts `eval:pure` y `eval:panel` que esta tabla anunciaba **ya no se crean**: eran la
+forma de tener evals deterministas cuando no había runner. Con vitest instalado, su
+contenido vive en `src/**/__tests__/*.test.ts` y se lanza con `pnpm -r test`. Ver
+[`pr-08-evals-entrega/plan.md`](./pr-08-evals-entrega/plan.md) §*Fuera de alcance*.
 
 Para ver llegar los frames NDJSON de uno en uno, `curl -N` desactiva el buffering:
 
