@@ -30,7 +30,10 @@ Commands:
 El modelo no recibe acceso directo a todo el backend. El harness le expone tools controladas:
 
 - `load_skill({ name })`: carga instrucciones para una capacidad.
-- `cli({ command })`: ejecuta comandos permitidos.
+- `cli({ input })`: ejecuta comandos permitidos. El parámetro se llama `input`, no
+  `command` (`harness.ts`, `Schema.Struct({ input: Schema.String })`); el adaptador lo
+  declara igual (`gemini.ts`, `toolParameters`) y el system prompt del tutor lo escribe
+  como `cli({"input": "..."})`.
 
 Las skills no son tools. Si Gemini intenta llamar una skill como tool, el adapter redirige esa llamada a `load_skill` cuando puede.
 
@@ -93,8 +96,15 @@ primera línea de respuesta.
 Cuando el presupuesto se agota, el harness **no** devuelve el último tool result —eso era el
 bug: el volcado de una página del PDF salía firmado por el tutor—. Gasta un turno más con
 las herramientas apagadas (`toolChoice: "none"`) para forzar una respuesta redactada con lo
-ya reunido, lo anota con el log `agent.wrap_up`, y si ese turno también falla devuelve un
-mensaje explícito de que se quedó sin pasos. Cubierto por
+ya reunido, y lo anota con el log `agent.wrap_up`. Ese turno de cierre tiene dos salidas
+distintas, que conviene no confundir:
+
+- Si **falla** (error del modelo), sale el texto de `modelErrorResponse`: *"I hit an
+  internal model/tool-routing error…"* más el mensaje del error. Nunca menciona pasos.
+- Si **tiene éxito pero devuelve texto vacío**, sale `wrapUpFallback`, que es el único
+  texto que habla de haberse quedado sin pasos.
+
+Cubierto por
 `packages/server/src/domain/agents/harness/__tests__/session-step-budget.test.ts`.
 
 Para que apagar las herramientas signifique algo, el adaptador tiene que decirlo: omitir
@@ -111,6 +121,13 @@ explícito (`gemini.ts`, `toolChoiceConfig`).
    - `{ type: "message", message }`
    - `{ type: "done" }`
 6. Si hubo tool results, la web invalida materiales/artifacts.
+
+**No hay streaming de tokens.** El adaptador de Gemini no lo implementa: `streamText`
+devuelve `Stream.empty` (`gemini.ts`). Lo que viaja por NDJSON son **mensajes completos**
+del harness (`AgentMessage`: el del usuario, cada llamada a tool, cada tool result y la
+respuesta final), emitidos según se van produciendo — `session.stream` los va ofreciendo a
+una `Queue` a medida que el bucle los añade (`harness/session.ts`). La respuesta del tutor
+aparece de golpe cuando está entera, no palabra a palabra.
 
 ## Salida estructurada (JSON) — PR-03
 
