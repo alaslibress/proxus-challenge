@@ -6,7 +6,7 @@
 - pnpm.
 - Poppler si vas a trabajar con PDFs:
   - macOS: `brew install poppler`
-  - comandos esperados: `pdfinfo`, `pdftoppm`
+  - comandos esperados: `pdfinfo`, `pdftoppm`, `pdftotext`
 - Google Gemini API key si vas a probar AI.
 
 ## Setup
@@ -69,7 +69,7 @@ artifacts create '{"kind":"quiz","title":"Demo","questions":[]}'
 
 ## Troubleshooting
 
-### `pdfinfo` o `pdftoppm` no existe
+### `pdfinfo`, `pdftoppm` o `pdftotext` no existe
 
 Instala Poppler y reinicia el proceso del server.
 
@@ -78,7 +78,7 @@ Instala Poppler y reinicia el proceso del server.
 El server valida dependencias críticas al arrancar:
 
 - `GOOGLE_GENERATIVE_AI_API_KEY` debe existir y no estar vacía.
-- `pdfinfo` y `pdftoppm` deben estar disponibles en `PATH`.
+- `pdfinfo`, `pdftoppm` y `pdftotext` deben estar disponibles en `PATH`.
 
 Esto es intencional: preferimos fallar temprano antes que levantar una app que fallará al primer uso de AI/PDF.
 

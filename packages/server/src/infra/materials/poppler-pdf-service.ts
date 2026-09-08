@@ -12,18 +12,19 @@ const make = (): Effect.Effect<PdfServiceType, PdfServiceError, ChildProcessSpaw
     ChildProcess.make(command, ["-v"])
   ).pipe(
     Effect.mapError((reason) => new PdfServiceError({
-      reason: `Missing required Poppler command "${command}". Install Poppler so pdfinfo and pdftoppm are available on PATH. Cause: ${String(reason)}`
+      reason: `Missing required Poppler command "${command}". Install Poppler so pdfinfo, pdftoppm, and pdftotext are available on PATH. Cause: ${String(reason)}`
     })),
     Effect.flatMap((exitCode) => exitCode === 0
       ? Effect.void
       : Effect.fail(new PdfServiceError({
-          reason: `Missing required Poppler command "${command}". Install Poppler so pdfinfo and pdftoppm are available on PATH. Exit code: ${exitCode}`
+          reason: `Missing required Poppler command "${command}". Install Poppler so pdfinfo, pdftoppm, and pdftotext are available on PATH. Exit code: ${exitCode}`
         }))
     )
   );
 
   yield* assertExecutable("pdfinfo");
   yield* assertExecutable("pdftoppm");
+  yield* assertExecutable("pdftotext");
 
   // Throwing inside `Effect.map` would produce a defect, which no `mapError` can
   // convert: an unreadable PDF would then be a 500 instead of a rejected upload.
@@ -89,7 +90,17 @@ const make = (): Effect.Effect<PdfServiceType, PdfServiceError, ChildProcessSpaw
     })
   );
 
-  return { pageCount, renderPage };
+  const extractPageText: PdfServiceType["extractPageText"] = ({ path: pdfPath, page }) =>
+    spawner.string(
+      ChildProcess.make("pdftotext", [
+        "-f", String(page), "-l", String(page), "-enc", "UTF-8", pdfPath, "-"
+      ])
+    ).pipe(
+      Effect.map((text) => ({ page, text })),
+      Effect.mapError((reason) => new PdfServiceError({ reason }))
+    );
+
+  return { pageCount, renderPage, extractPageText };
 });
 
 export const PopplerPdfService = {

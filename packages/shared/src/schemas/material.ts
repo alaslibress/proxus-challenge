@@ -23,6 +23,16 @@ export const MaterialPageImages = Schema.Struct({
 });
 export type MaterialPageImages = typeof MaterialPageImages.Type;
 
+export const PageText = Schema.Struct({ page: Schema.Number, text: Schema.String });
+export type PageText = typeof PageText.Type;
+
+export const MaterialPageTexts = Schema.Struct({
+  type: Schema.Literal("material-page-texts"),
+  material: PdfMaterial,
+  pages: Schema.Array(PageText)
+});
+export type MaterialPageTexts = typeof MaterialPageTexts.Type;
+
 export const MaterialListResponse = Schema.Struct({
   materials: Schema.Array(PdfMaterial)
 });

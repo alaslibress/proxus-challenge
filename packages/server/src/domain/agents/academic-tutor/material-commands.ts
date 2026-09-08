@@ -64,7 +64,39 @@ export const makeMaterialCommands = (repository: MaterialRepository) => {
     )
   );
 
-  return AgentCli.Command.group("materials", [list, view] as const).pipe(
+  const text = AgentCli.Command.withExamples([
+    { command: "materials text algebra-notes 10", description: "Extract literal text from page 10" },
+    { command: "materials text algebra-notes 13-20", description: "Extract literal text from pages 13 through 20" },
+    { command: "materials text algebra-notes 10,13-20", description: "Extract literal text from page 10 and pages 13 through 20" }
+  ])(
+    AgentCli.Command.withDescription("Extract literal PDF text for exact quoting")(
+      AgentCli.Command.exec("text", {
+        materialId: AgentCli.Argument.string("materialId").pipe(
+          AgentCli.Argument.withDescription("Material id from `materials list`")
+        ),
+        pages: AgentCli.Argument.withMetavar("<pages:10,13-20>")(
+          AgentCli.Argument.withDescription("Page selection like 10 or 13-20 or 10,13-20")(
+            AgentCli.Argument.string("pages")
+          )
+        )
+      }, ({ materialId, pages }) =>
+        parsePageSelection(pages).pipe(
+          Effect.andThen((parsedPages) => repository.extractText(materialId, parsedPages)),
+          Effect.map((result) =>
+            result.pages.map((page) => {
+              const trimmed = page.text.trim();
+              return trimmed.length === 0
+                ? `--- ${materialId} page ${page.page} (no extractable text; use materials view instead) ---`
+                : `--- ${materialId} page ${page.page} ---\n${page.text}`;
+            }).join("\n\n")
+          ),
+          Effect.catch((error) => Effect.succeed(renderMaterialError(error)))
+        )
+      )
+    )
+  );
+
+  return AgentCli.Command.group("materials", [list, view, text] as const).pipe(
     AgentCli.Command.withDescription("Uploaded PDF material commands")
   );
 };
