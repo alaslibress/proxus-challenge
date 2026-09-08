@@ -381,3 +381,86 @@ El usuario pierde la vista parcial del stream, pero el modelo recibirá un histo
 **Solución** (95e1ef6): restaurar las importaciones de `PdfUploader` y `upload.ts` y añadir `<PdfUploader onUploaded={refreshMaterials} />` siempre visible al final de la sección de materiales, independientemente de si ya hay PDFs o no.
 
 **Descartado**: mostrar el uploader solo cuando la lista está vacía (reproduce el bug en cuanto el primer PDF es subido).
+
+---
+
+## PR-14 — Subida de PDFs y parada real del chat
+
+### El botón `Stop` no detenía nada, según el usuario
+
+**Síntoma**: al pulsar `Stop` durante una respuesta, "el razonamiento no se detiene".
+
+**Causa**: no era lo que parecía. El servidor **sí** cancela. Medido con un servidor
+aislado en `:3010`, cortando el cliente a los 7 s: el `http.span` cierra en ese instante,
+la llamada a Gemini en vuelo se queda sin `gemini.response` y no se registra un
+`agent.step` más. Idéntico por la ruta directa (7135 ms) y a través del proxy de Vite
+(6810 ms). La cadena estaba bien desde el principio: `NodeHttpServer.ts:195-197` interrumpe
+el fiber cuando la conexión se cierra antes de tiempo, `Stream.callback`
+(`harness/session.ts:51`) ata el bucle del agente al scope del stream, y `gemini.ts:335-341`
+pasa el `signal` al `fetch`.
+
+El fallo real estaba en el cliente, en `use-tutor-chat.ts`: el `catch` trataba **fallo** y
+**parada voluntaria** como el mismo caso. Solo el mensaje de error se distinguía con
+`isAbortError`; el rollback (`setMessages(history)` + `setInput(prompt)`) se aplicaba a los
+dos. Al pulsar `Stop` desaparecían los mensajes del turno y el prompt volvía al textarea:
+el chat quedaba como si nunca se hubiera enviado nada, que es exactamente lo que se lee
+como "no ha parado".
+
+**Solución**: extraer la decisión a `resolveStreamFailure` (`domain/tutor/stream.ts`),
+función pura que devuelve `{ keepMessages, restoreInput, showError }`. Una parada conserva
+los mensajes, deja el textarea vacío y no ofrece `Retry`; un fallo mantiene el
+comportamiento anterior. El turno detenido se marca con una línea *"Stopped"*.
+
+**Nota**: la afirmación previa de `funcionamiento-actual.md` de que cancelar el fiber del
+servidor "no está verificado en `4.0.0-beta.83`" era incorrecta. Queda verificada.
+
+### Un `throw` dentro de `Effect.map` hacía imposible el 400
+
+**Síntoma**: subir un fichero que no es PDF devolvía 500, no el 400 tipado previsto.
+
+**Causa**: `poppler-pdf-service.ts` lanzaba `throw new Error(...)` dentro de `Effect.map`
+cuando `pdfinfo` no imprimía la línea `Pages:`. Un `throw` ahí produce un **defect**, no un
+fallo tipado, así que ni el `Effect.mapError` de la línea siguiente ni el del repositorio
+podían convertirlo: se propagaba como defecto hasta el 500.
+
+**Solución**: `Effect.flatMap` + `Effect.fail(new PdfServiceError(...))`. Efecto colateral
+útil: un PDF corrupto ya presente en el directorio también pasa a ser error tipado en
+`list`, en vez de un defecto.
+
+### El multipart bufferizado escribe el temporal con el nombre del cliente
+
+**Síntoma**: subir `Tema 1: variables.pdf` o `Que es?.pdf` devolvía 500. Con espacios o
+acentos, 200. El error salía de sitios distintos según el carácter: `?` moría en
+`NodeMultipart.ts:72` con `MultipartError`, `:` llegaba hasta el repositorio (en NTFS los
+dos puntos abren un *alternate data stream*, así que la escritura no falla, produce algo
+que no es el fichero esperado).
+
+**Causa**: `HttpApiSchema.asMultipart` persiste cada fichero en un temporal **nombrado con
+el nombre original del cliente**. Nuestro saneado vivía en el repositorio, es decir después
+de esa escritura: llegaba tarde. En Windows, `: ? * " < > |` no son válidos en un nombre de
+fichero.
+
+**Intento descartado**: capturar `MultipartError` en el handler. No es posible — el payload
+se decodifica antes de que el handler corra, y ese error no está en su canal de error. El
+typecheck lo rechaza (`"MultipartError" is not assignable to "InvalidPdf"`).
+
+**Solución**: `HttpApiSchema.asMultipartStream` y un módulo de transporte
+(`transport/http/upload.ts`) que recorre las partes, escribe la primera parte de fichero en
+un temporal **con nombre elegido por el servidor** (`upload.pdf` dentro de un directorio
+propio) y borra ese directorio con `Effect.ensuring` pase lo que pase. El nombre del cliente
+ya no toca el sistema de ficheros: solo se usa, saneado, para decidir el nombre final. De
+paso, dos casos que antes eran 500 pasan a ser 400 con mensaje: petición sin fichero y
+fichero por encima del límite.
+
+### Validar el PDF antes de moverlo, no después
+
+**Síntoma**: ninguno todavía; es un fallo que se evitó por diseño.
+
+**Causa**: `listFiles()` ejecuta `pdfinfo` sobre **todos** los `.pdf` del directorio en cada
+`list`, `get` y `renderPages`. Un solo fichero ilegible ahí dentro hace fallar el
+`Effect.forEach` entero, y el handler `list` termina en `Effect.orDie`: 500 y sidebar vacía.
+Un fichero malo rompe el catálogo completo, no solo su propia entrada.
+
+**Solución**: `save` valida con `pdfinfo` sobre el temporal y solo mueve el fichero al
+directorio de materiales si esa validación pasa. La verificación incluye un check explícito
+de que `GET /api/materials/` sigue devolviendo 200 después de un upload rechazado.

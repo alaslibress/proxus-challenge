@@ -1,8 +1,11 @@
 import { Effect, FileSystem, Layer, Option, Path } from "effect";
 import {
+  InvalidPdf,
   MaterialNotFound,
   MaterialRepository,
   MaterialRepositoryError,
+  resolveFileNameCollision,
+  sanitizeFileName,
   type MaterialPageImages,
   type MaterialRepository as MaterialRepositoryType,
   type PdfMaterial
@@ -69,6 +72,43 @@ export const FileMaterialRepository = {
       Effect.map((file) => file.material)
     );
 
+    const save = (input: {
+      readonly fileName: string;
+      readonly path: string;
+    }): Effect.Effect<PdfMaterial, InvalidPdf | MaterialRepositoryError> => Effect.gen(function* () {
+      yield* fs.makeDirectory(directory, { recursive: true }).pipe(Effect.mapError(mapError));
+
+      // Validate on the temporary file, before it enters the materials directory.
+      // `listFiles` runs pdfinfo over every file in there on each list/get/renderPages,
+      // so a single unreadable PDF would break the whole catalogue, not just this one.
+      yield* pdf.pageCount(input.path).pipe(
+        Effect.mapError(() => new InvalidPdf({ message: "That file is not a readable PDF." }))
+      );
+
+      const existing = yield* listFiles();
+      const taken = new Set(existing.map((file) => file.material.fileName.toLowerCase()));
+      const fileName = resolveFileNameCollision(sanitizeFileName(input.fileName), taken);
+      const destination = pdfPath(fileName);
+
+      yield* fs.rename(input.path, destination).pipe(
+        Effect.catch(() =>
+          // Multipart persists uploads to a temp directory that may sit on another
+          // volume, where rename fails with EXDEV. Fall back to copying.
+          fs.copyFile(input.path, destination).pipe(
+            Effect.andThen(fs.remove(input.path).pipe(Effect.ignore)),
+            Effect.mapError(mapError)
+          )
+        )
+      );
+
+      // Read the material back through the same path `list` uses, so a freshly uploaded
+      // material is byte-for-byte what the catalogue will report from now on.
+      return yield* getFile(path.basename(fileName, ".pdf")).pipe(
+        Effect.map((file) => file.material),
+        Effect.catchTag("MaterialNotFound", (e) => new MaterialRepositoryError({ reason: e }))
+      );
+    });
+
     const deleteMaterial = (id: string): Effect.Effect<void, MaterialNotFound | MaterialRepositoryError> =>
       Effect.gen(function* () {
         // Resolve path via repository listing — never by concatenating the raw id.
@@ -100,7 +140,7 @@ export const FileMaterialRepository = {
       };
     });
 
-    return { list, get, delete: deleteMaterial, renderPages };
+    return { list, get, save, delete: deleteMaterial, renderPages };
   }),
   layer: (directory: string) => Layer.effect(MaterialRepository)(FileMaterialRepository.make(directory))
 };

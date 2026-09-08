@@ -5,6 +5,7 @@ import { TutorChatService } from "../../domain/agents/academic-tutor/tutor-chat-
 import { type Artifact } from "@proxus/shared";
 import { ArtifactRepository } from "../../domain/artifacts/artifact.ts";
 import { MaterialRepository } from "../../domain/materials/material.ts";
+import { withUploadedFile } from "./upload.ts";
 
 export const TutorHttpHandlers = HttpApiBuilder.group(
   ProxusApi,
@@ -34,6 +35,14 @@ export const MaterialsHttpHandlers = HttpApiBuilder.group(
         materials.delete(params.id).pipe(
           Effect.catchTag("MaterialNotFound", (e) =>
             Effect.fail({ _tag: "MaterialNotFound" as const, materialId: e.materialId })
+          ),
+          Effect.catchTag("MaterialRepositoryError", (e) => Effect.die(e))
+        )
+      )
+      .handle("upload", ({ payload }) =>
+        withUploadedFile(payload, (file) => materials.save(file)).pipe(
+          Effect.catchTag("InvalidPdf", (e) =>
+            Effect.fail({ _tag: "InvalidPdf" as const, message: e.message })
           ),
           Effect.catchTag("MaterialRepositoryError", (e) => Effect.die(e))
         )
