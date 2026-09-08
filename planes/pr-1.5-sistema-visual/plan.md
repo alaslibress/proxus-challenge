@@ -249,7 +249,8 @@ literal no está aquí, el doer para y lo notifica.
 
    Debe dar ~145. Al final del PR tiene que dar **0**.
 4. [ ] Comprobar la versión de Tailwind: `packages/web/package.json` declara
-       `tailwindcss ^4.3.1` y `@tailwindcss/cli ^4.3.1`. El bloque `@theme` y los tokens
+       `tailwindcss ^4.3.1` (línea 23) y `@tailwindcss/vite ^4.3.3` (línea 26) — el
+       **plugin de Vite**, no el CLI. El bloque `@theme` y los tokens
        `--text-*` son sintaxis de v4. **Verificar contra la versión instalada antes de
        escribir el fichero entero**; si `--text-<n>--line-height` no funciona en 4.3.1,
        usar utilidades `leading-*` en los componentes y dejar sólo el tamaño en el token.
@@ -399,7 +400,8 @@ recetas del canvas que sí aplican hoy:
         excepciones. El color sale de un token.
      2. ¿Falta un color? Se añade un token a `styles.input.css` y una fila a este
         documento, en el mismo commit. No se resuelve con un literal "de momento".
-     3. `styles.generated.css` es generado. Se edita `styles.input.css`.
+     3. El único fichero de estilos del repo es `styles.input.css`, y es el que se edita.
+        Tailwind corre como plugin de Vite; no hay CSS generado que versionar ni tocar.
      4. El guard del Paso 8 tiene que dar 0 antes de abrir cualquier PR de UI.
 2. [ ] `AGENTS.md`, sección `## Frontend`: añadir tres viñetas apuntando al documento y a
        la regla del literal prohibido, más el comando del guard.
@@ -418,8 +420,9 @@ recetas del canvas que sí aplican hoy:
    grep -rnE '(bg|text|border|ring|from|to|via|fill|stroke|placeholder|divide|shadow|accent)-(slate|sky|indigo|emerald|red|blue|gray|zinc|neutral|stone|violet|purple)-[0-9]{2,3}' packages/web/src --include=*.tsx
    ```
 
-2. [ ] `pnpm --filter @proxus/web run build` regenera `styles.generated.css`.
-       `git status` **no** debe mostrarlo.
+2. [ ] `pnpm --filter @proxus/web run build` termina en verde: el plugin de Tailwind
+       genera el CSS dentro del bundle de `packages/web/dist/`, que está en `.gitignore`.
+       `git status` **no** debe mostrar ningún `.css` nuevo bajo `packages/web/src/`.
 3. [ ] Revisar contraste con las DevTools en los textos pequeños. Los sospechosos son
        `ink-faint` (`#5F5975`) sobre `surface-raised` (`#F5F2FC`) a 11px, y el mono de
        10.5px de las filas de material. **Si alguno no llega a 4.5:1, no se cambia el
@@ -459,11 +462,12 @@ pnpm --filter @proxus/web run build
 # guard: 0 aciertos
 grep -rnE '(bg|text|border|ring|from|to|via|fill|stroke|placeholder|divide|shadow|accent)-(slate|sky|indigo|emerald|red|blue|gray|zinc|neutral|stone|violet|purple)-[0-9]{2,3}' packages/web/src --include=*.tsx
 
-# los tokens existen y salieron a las utilidades generadas
-grep -c -- "--color-brand" packages/web/src/styles.generated.css      # ≥ 1
+# los tokens existen en la única hoja de estilos del repo
+grep -c -- "--color-brand" packages/web/src/styles.input.css          # ≥ 1
 grep -c "color-scheme: light" packages/web/src/styles.input.css       # 1
 
-git status --porcelain packages/web/src/styles.generated.css          # vacío
+# no aparece ningún CSS suelto en el árbol: el plugin de Vite emite dentro de dist/
+git status --porcelain packages/web/src                               # vacío
 ```
 
 ## QA manual
@@ -505,8 +509,10 @@ git status --porcelain packages/web/src/styles.generated.css          # vacío
   —autoalojar con `@fontsource/geist`— añade dependencia y peso al bundle. **Decisión:
   Google Fonts ahora**, autoalojar si aparece un requisito de offline.
 
-- **`@theme` de Tailwind v4 es sintaxis nueva.** El repo usa el CLI de Tailwind, no el
-  plugin de Vite, y `styles.generated.css` está en `.gitignore`. Si algún token no genera
+- **`@theme` de Tailwind v4 es sintaxis nueva.** Tailwind corre como **plugin de Vite**
+  (`@tailwindcss/vite`, registrado en `packages/web/vite.config.ts:3,10`): el CSS se genera
+  en memoria durante el build y sale dentro de `packages/web/dist/`, nunca al árbol de
+  fuentes. La única hoja del repo es `styles.input.css`. Si algún token no genera
   la utilidad esperada en 4.3.1, el Paso 0.4 obliga a parar y notificar en vez de
   improvisar clases arbitrarias (`bg-[#6B33DC]`), que reintroducirían el problema que este
   PR viene a resolver.
@@ -532,4 +538,32 @@ git status --porcelain packages/web/src/styles.generated.css          # vacío
 
 ## Historial
 
-- *(vacío)*
+### 2026-09-08 — Corregidas las referencias al `styles.generated.css` difunto
+
+El plan describía un montaje de Tailwind que el repo ya no tiene: un CLI que producía
+`packages/web/src/styles.generated.css`, fichero versionado-pero-ignorado que había que
+regenerar a mano. **Ese fichero no existe y ningún build lo escribe.** Verificado contra el
+código: `@tailwindcss/vite` está registrado como plugin en `packages/web/vite.config.ts:3,10`,
+la única hoja de estilos del repo es `packages/web/src/styles.input.css` —importada desde
+`packages/web/src/main.tsx:5`— y el CSS resultante sale dentro del bundle de
+`packages/web/dist/`. `packages/web/package.json` declara `@tailwindcss/vite` (línea 26),
+no `@tailwindcss/cli`.
+
+Corregido, sin tocar nada más del plan:
+
+- **Paso 0.4** — decía que el `package.json` declara `@tailwindcss/cli ^4.3.1`. Ahora cita
+  el plugin de Vite con su línea real.
+- **Paso 7.1, regla dura 3** — *"`styles.generated.css` es generado. Se edita
+  `styles.input.css`"* pasa a decir que `styles.input.css` es la única hoja del repo y que
+  no hay CSS generado que versionar.
+- **Paso 8.2** — pedía que el build *"regenerase"* el fichero y que `git status` no lo
+  mostrase. Ahora comprueba lo que sí es comprobable: que el build va en verde y que no
+  aparece ningún `.css` nuevo bajo `packages/web/src/`.
+- **Checks** — los dos `grep` sobre `styles.generated.css` apuntaban a un fichero
+  inexistente, así que siempre habrían fallado. El de `--color-brand` pasa a leer
+  `styles.input.css` (da 6); el `git status --porcelain` se amplía a `packages/web/src`.
+- **Riesgos** — *"El repo usa el CLI de Tailwind, no el plugin de Vite"* decía exactamente
+  lo contrario de la realidad. Reescrito.
+
+El guard de color canónico vive en `documentacion/design-system.md:275`; el de este plan es
+copia y ahora coincide con él.

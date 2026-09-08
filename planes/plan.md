@@ -114,9 +114,10 @@ Documentos de origen, en `documentacion/`:
 | PR-05 | [`pr-05-transporte-ndjson/plan.md`](./pr-05-transporte-ndjson/plan.md) | Ruta `POST /api/artifacts/:id/submit/stream` con estados discretos, lector NDJSON resiliente compartido en web y cierre siempre con frame terminal. | mergeado | PR-04 |
 | PR-06 | [`pr-06-trazabilidad/plan.md`](./pr-06-trazabilidad/plan.md) | Trazabilidad nativa: log determinista en Markdown bajo `.data/sessions/`, escrito con `Effect.forkDetach` fuera del camino crítico. | mergeado | PR-04 |
 | PR-07 | [`pr-07-ui-observabilidad/plan.md`](./pr-07-ui-observabilidad/plan.md) | UI del `ArtifactWorkspace`: estado de evaluación en un atom, los dos profes activos a la vez, Juez después, y render del feedback con las citas y su badge de verificación. | mergeado | PR-05 |
-| PR-08 | [`pr-08-evals-entrega/plan.md`](./pr-08-evals-entrega/plan.md) | Cierre de la cobertura de tests que dejaron PR-03, PR-05 y PR-06 (`gemini-schema`, `trace-format`, `readNdjson`, stream de evaluación), script `test` en la raíz, QA final y README de entrega. **No recortable.** | en curso | — |
+| PR-08 | [`pr-08-evals-entrega/plan.md`](./pr-08-evals-entrega/plan.md) | Cierre de la cobertura de tests que dejaron PR-03, PR-05 y PR-06 (`gemini-schema`, `trace-format`, `readNdjson`, stream de evaluación), script `test` en la raíz, QA final y README de entrega. **No recortable.** | implementado, PR #7 abierto | — |
 
-Estados: `por diseñar` → `borrador` → `listo para implementar` → `en curso` → `mergeado`.
+Estados: `por diseñar` → `borrador` → `listo para implementar` → `en curso` →
+`implementado, PR #N abierto` → `mergeado`.
 
 **Los PRs se implementan en orden estricto, uno detrás de otro.** El orden real es
 **PR-01 → PR-1.5 → PR-12 → PR-12.1 → PR-12.2 → PR-09 → PR-13 → PR-10 → PR-11 → PR-02 → … → PR-08**: los PRs de UX se numeran 1.5, 09,
@@ -183,7 +184,9 @@ Antes de tocar nada, el doer lee `documentacion/contexto-repo.md` (mapa de arqui
 - `rewriteRelativeImportExtensions`: **los imports relativos llevan `.ts`**.
 - No crear `packages/web/src/api/` — colisiona con el proxy de Vite
   (`root: "src"`). El cliente vive en `src/api-client/`.
-- `packages/web/src/styles.generated.css` es generado: se edita `styles.input.css`.
+- Tailwind v4 corre como plugin de Vite (`@tailwindcss/vite`, `vite.config.ts:3,10`). La
+  única hoja de estilos del repo es `packages/web/src/styles.input.css`; no hay CSS
+  generado en el árbol de fuentes.
 - Persistencia: ficheros bajo `packages/server/.data/`. No se añade base de
   datos ni auth (`CHALLENGE.md` lo excluye explícitamente como mejora principal).
 - El agente expone al modelo **solo dos tools**: `load_skill` y `cli`. Añadir
