@@ -8,7 +8,7 @@ import type {
   SubmitAttemptInput,
   TestQuestion
 } from "@proxus/shared";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Streamdown } from "streamdown";
 import * as AsyncResult from "effect/unstable/reactivity/AsyncResult";
 import { artifactQuery, submitArtifactAttemptAction } from "../domain/artifacts/atoms.ts";
@@ -17,14 +17,17 @@ type Answers = Record<string, string>;
 
 interface ArtifactWorkspaceProps {
   readonly artifactId: string | null;
+  readonly onClose?: () => void;
 }
 
-export function ArtifactWorkspace({ artifactId }: ArtifactWorkspaceProps) {
+export function ArtifactWorkspace({ artifactId, onClose }: ArtifactWorkspaceProps) {
   if (artifactId === null) {
     return <EmptyWorkspace />;
   }
 
-  return <ArtifactDetail artifactId={artifactId} />;
+  return onClose !== undefined
+    ? <ArtifactDetail artifactId={artifactId} onClose={onClose} />
+    : <ArtifactDetail artifactId={artifactId} />;
 }
 
 function EmptyWorkspace() {
@@ -59,17 +62,58 @@ function EmptyWorkspace() {
   );
 }
 
-function ArtifactDetail({ artifactId }: { readonly artifactId: string }) {
+function ArtifactDetail({ artifactId, onClose }: { readonly artifactId: string; readonly onClose?: () => void }) {
   const artifact = useAtomValue(artifactQuery(artifactId));
 
+  useEffect(() => {
+    if (onClose === undefined) return;
+    const handler = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") return;
+      const target = event.target as HTMLElement;
+      // Don't close while typing inside an input or textarea
+      if (target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.isContentEditable) return;
+      onClose();
+    };
+    document.addEventListener("keydown", handler);
+    return () => { document.removeEventListener("keydown", handler); };
+  }, [onClose]);
+
   return (
-    <main className="h-screen min-w-0 overflow-y-auto border-r border-line bg-canvas p-6 max-md:h-auto max-md:border-r-0 max-md:border-b">
-      {AsyncResult.matchWithError(artifact, {
-        onInitial: () => <p className="text-ink-mute" style={{ fontSize: 13 }}>Loading artifact…</p>,
-        onError: (error) => <p className="text-danger" style={{ fontSize: 13 }}>{String(error)}</p>,
-        onDefect: (defect) => <p className="text-danger" style={{ fontSize: 13 }}>{String(defect)}</p>,
-        onSuccess: ({ value }) => <ArtifactContent artifact={value} />
-      })}
+    <main className="h-screen min-w-0 overflow-y-auto border-r border-line bg-canvas max-md:h-auto max-md:border-r-0 max-md:border-b">
+      <div
+        className="sticky top-0 z-10 flex items-center justify-between border-b border-line bg-surface-raised"
+        style={{ padding: "10px 16px" }}
+      >
+        <span className="text-ink-faint" style={{ fontSize: 12, fontWeight: 500, letterSpacing: ".06em" }}>
+          ARTIFACT
+        </span>
+        {onClose !== undefined && (
+          <button
+            type="button"
+            aria-label="Close artifact"
+            onClick={onClose}
+            className="border border-line-strong text-ink-mute hover:bg-surface-muted"
+            style={{
+              borderRadius: 8,
+              padding: "5px 14px",
+              fontSize: 13,
+              fontWeight: 500,
+              transitionDuration: "120ms",
+              transitionTimingFunction: "var(--ease-dc)"
+            }}
+          >
+            Close
+          </button>
+        )}
+      </div>
+      <div style={{ padding: 24 }}>
+        {AsyncResult.matchWithError(artifact, {
+          onInitial: () => <p className="text-ink-mute" style={{ fontSize: 13 }}>Loading artifact…</p>,
+          onError: (error) => <p className="text-danger" style={{ fontSize: 13 }}>{String(error)}</p>,
+          onDefect: (defect) => <p className="text-danger" style={{ fontSize: 13 }}>{String(defect)}</p>,
+          onSuccess: ({ value }) => <ArtifactContent artifact={value} />
+        })}
+      </div>
     </main>
   );
 }
