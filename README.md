@@ -274,11 +274,27 @@ el sistema con ello. Cubren, entre otras cosas:
 - que el schema de artifacts acepta lo que la skill documenta y rechaza lo que no
   (`artifact-schema.test.ts`, 5 casos).
 
-Además, la suite se ha comprobado **rompiéndola a propósito**: al invalidar la condición de
-cita verificada —hoy encapsulada en `panelRaisesScore` (`review.ts:72-76`)— se ponen en rojo
-tres tests de `review.test.ts`; se comprobó ejecutándolo. Desde esta entrega esa misma
-mutación tumbaría además los dos casos de `panelRaisesScore` que cubren justo ese punto
-(cita sin verificar, y sin citas). Una suite que no puede ponerse roja no vale nada.
+Además, la suite se ha comprobado **rompiéndola a propósito**: relajando
+`panelRaisesScore` (`review.ts:72-76`) para que la nota suba con `is_correct` a secas
+—es decir, quitando la exigencia de cita `verified`— se ponen en rojo **exactamente 5
+tests**, todos en `review.test.ts`. Cifra comprobada ejecutando `npm test` con la mutación
+puesta (5 failed | 126 passed) y revirtiéndola después (151/151 en verde):
+
+- `reviewGradedAttempt › does NOT raise the grade when the citation is
+  invented/unverifiable against the real text`
+- `reviewGradedAttempt › does NOT raise the grade when the panel says is_correct but the
+  citation is unverified`
+- `reviewGradedAttempt › does NOT raise the grade when the panel says is_correct but cites
+  nothing at all (citas_pdf: [])`
+- `panelRaisesScore › does NOT raise the score when the judge says correct but no citation
+  is verified`
+- `panelRaisesScore › does NOT raise the score when the judge says correct but cites
+  nothing`
+
+Los otros tres casos de `describe("panelRaisesScore")` siguen verdes, y así debe ser:
+cubren la dirección contraria de la regla (correcta + cita verificada **sí** sube;
+incorrecta con cita verificada no sube; sin panel no sube), que la mutación no toca.
+Una suite que no puede ponerse roja no vale nada.
 
 ### Checks contra Gemini de verdad
 
