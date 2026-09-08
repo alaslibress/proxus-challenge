@@ -311,3 +311,31 @@ El rate limit free tier de gemini-3.6-flash es 20 peticiones/día. Se resetea a 
 | `documentacion/dificultades.md` | Nuevas entradas: thoughtSignature, Effect.orDie/typed errors, exactOptionalPropertyTypes, rate limit |
 | `documentacion/funcionamiento-actual.md` | §1 test runner; §3 renderPrompt estructurado; §5 endpoint DELETE; §6 modelo; §7 My Favorite Teacher + delete + close |
 | `documentacion/sesion-08-sep-2026.md` | Este fichero |
+
+---
+
+## Addendum — PR-10, PR-11 y fix uploader (commits posteriores)
+
+### PR-10 (2f36407) — Ciclo de vida del input del chat
+
+Implementado tras la sesión principal. Ver `planes/pr-10-chat-input-lifecycle/plan.md`.
+
+- `stream.ts`: `AbortSignal`, `reader.cancel()` en finally, errores saneados, `isAbortError` exportado.
+- `use-tutor-chat.ts` (nuevo): hook completo — `setInput("")` antes del primer await, rollback del historial en error/abort, cleanup de desmontaje.
+- `Chat.tsx`: pura presentación. Textarea `disabled`+`aria-busy`. Botón Send↔Stop. Enter envía (guard IME). Burbuja de puntos animados. Panel de error con Retry.
+
+### PR-11 (79e41c7) — Cortocircuito de herramientas
+
+- `academic-tutor.ts`: nuevo system prompt con inventario de materiales + reglas explícitas: responder directo sin tool call para conocimiento general, saludos, o info ya en conversación; nunca llamar `materials list`.
+- `tutor-chat-service.ts`: harness construido por petición; llama `list()` cada request con `orElseSucceed`; `maxSteps: 4`.
+- Skills: descripciones acotadas; `use-uploaded-materials` ya no anuncia `materials list`; `create-study-artifacts` no fuerza inspección para artefactos de tema general.
+
+### Tests (bb875ec)
+
+- `packages/server`: 27 tests / 4 suites (5 nuevos — `buildMaterialsContext`).
+- `packages/web`: vitest añadido, 7 tests — `isAbortError`.
+
+### Fix uploader (95e1ef6)
+
+**Bug**: `PdfUploader` desapareció del sidebar con la reescritura del PR-13.
+**Fix**: restaurar `PdfUploader.tsx` y `upload.ts` del historial git; siempre visible al final de la sección de materiales.

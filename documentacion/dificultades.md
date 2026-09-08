@@ -367,3 +367,17 @@ El usuario pierde la vista parcial del stream, pero el modelo recibirá un histo
 **Solución**: extraer la lógica a `export const buildMaterialsContext = (materials: ReadonlyArray<...>): string => ...` justo antes de `TutorChatServiceLive`. Es una función pura de datos; el export no expone estado ni efectos.
 
 **Descartado**: testear vía `Layer` con repositorio en memoria (mucho más código de test para el mismo grado de confianza sobre una transformación de strings).
+
+---
+
+## Fix post-PR-13 — Uploader de PDF desapareció del sidebar
+
+### `PdfUploader` y `upload.ts` eliminados accidentalmente en la reescritura del PR-13
+
+**Síntoma**: con al menos un PDF ya subido, no había forma de subir otro: el uploader no aparecía en ninguna parte del sidebar.
+
+**Causa**: el PR-13 reescribió `Sidebar.tsx` desde cero para añadir `MaterialRow` con borrado inline. La nueva versión no importaba `PdfUploader` ni la acción `uploadMaterial` de `upload.ts`, que habían quedado fuera del alcance visible al redactar el PR. El componente y la acción seguían existiendo en disco pero sin ningún callsite.
+
+**Solución** (95e1ef6): restaurar las importaciones de `PdfUploader` y `upload.ts` y añadir `<PdfUploader onUploaded={refreshMaterials} />` siempre visible al final de la sección de materiales, independientemente de si ya hay PDFs o no.
+
+**Descartado**: mostrar el uploader solo cuando la lista está vacía (reproduce el bug en cuanto el primer PDF es subido).
