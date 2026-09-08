@@ -19,6 +19,13 @@ export const TutorChatService = Context.Service<TutorChatService>(
   "@proxus/server/agents/academic-tutor/TutorChatService"
 );
 
+export const buildMaterialsContext = (
+  materials: ReadonlyArray<{ readonly id: string; readonly title: string; readonly pageCount: number }>
+): string =>
+  materials.length === 0
+    ? "No PDF materials have been uploaded yet."
+    : materials.map((m) => `- ${m.id}: "${m.title}" (${m.pageCount} pages)`).join("\n");
+
 export const TutorChatServiceLive = Layer.effect(
   TutorChatService,
   Effect.gen(function* () {
@@ -29,9 +36,7 @@ export const TutorChatServiceLive = Layer.effect(
       const materials = yield* materialRepository.list().pipe(
         Effect.orElseSucceed(() => [] as const)
       );
-      const materialsContext = materials.length === 0
-        ? "No PDF materials have been uploaded yet."
-        : materials.map((m) => `- ${m.id}: "${m.title}" (${m.pageCount} pages)`).join("\n");
+      const materialsContext = buildMaterialsContext(materials);
       const harness = makeAcademicTutorHarness(materialRepository, artifactRepository, materialsContext);
       return { harness, session: AgentSession.make(harness) };
     });

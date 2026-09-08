@@ -27,7 +27,10 @@ Effect v4 **beta**, `4.0.0-beta.83` pineado exacto en los cuatro paquetes, sin r
 `rewriteRelativeImportExtensions`. Esto último obliga a que **todo import relativo lleve
 la extensión `.ts`/`.tsx`**; se cumple al 100% en el código existente.
 
-**Test runner** (PR-13 / sesión 8-sep-2026): se añadió `vitest@5` a `packages/server`. El script `pnpm --filter @proxus/server run test` ejecuta 22 tests unitarios (3 suites: `message.ts`, `session.ts` funciones puras, `gemini.ts` encode/decode de thoughtSignature). El gate sigue siendo `pnpm run typecheck`; los tests son la segunda capa.
+**Test runner**: `vitest@5` en `packages/server` (22→27 tests) y `packages/web` (7 tests). Suites:
+- Server: `message.ts` constructores (7), `session.ts` funciones puras (7), `gemini.ts` encode/decode thoughtSignature (8), `tutor-chat-service.ts` buildMaterialsContext (5).
+- Web: `stream.ts` `isAbortError` predicado (7).
+El gate sigue siendo `pnpm run typecheck`; los tests son la segunda capa.
 
 ---
 
