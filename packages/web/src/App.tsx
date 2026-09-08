@@ -15,8 +15,16 @@ export function App() {
           : "252px minmax(0, 1fr) 420px"
       }}
     >
-      <Sidebar selectedArtifactId={selectedArtifactId} onSelectArtifact={setSelectedArtifactId} />
-      {selectedArtifactId !== null && <ArtifactWorkspace artifactId={selectedArtifactId} />}
+      <Sidebar
+        selectedArtifactId={selectedArtifactId}
+        onSelectArtifact={(id) => setSelectedArtifactId((current) => current === id ? null : id)}
+      />
+      {selectedArtifactId !== null && (
+        <ArtifactWorkspace
+          artifactId={selectedArtifactId}
+          onClose={() => setSelectedArtifactId(null)}
+        />
+      )}
       <Chat />
     </div>
   );

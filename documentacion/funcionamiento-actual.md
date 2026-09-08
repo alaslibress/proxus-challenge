@@ -27,7 +27,10 @@ Effect v4 **beta**, `4.0.0-beta.83` pineado exacto en los cuatro paquetes, sin r
 `rewriteRelativeImportExtensions`. Esto último obliga a que **todo import relativo lleve
 la extensión `.ts`/`.tsx`**; se cumple al 100% en el código existente.
 
-No hay test runner. No hay eslint ni biome. El gate es `pnpm run typecheck`.
+**Test runner**: `vitest@5` en `packages/server` (22→27 tests) y `packages/web` (7 tests). Suites:
+- Server: `message.ts` constructores (7), `session.ts` funciones puras (7), `gemini.ts` encode/decode thoughtSignature (8), `tutor-chat-service.ts` buildMaterialsContext (5).
+- Web: `stream.ts` `isAbortError` predicado (7).
+El gate sigue siendo `pnpm run typecheck`; los tests son la segunda capa.
 
 ---
 
@@ -59,7 +62,7 @@ Chat.tsx ──fetch POST /api/tutor/chat/stream──► server.ts (HttpRouter 
   decodifica con **`Schema.decodeUnknownSync`**, que lanza: **un frame de tipo
   desconocido revienta el generador y mata el stream entero**. Server y web tienen que
   desplegarse juntos ante cualquier cambio de protocolo.
-- No hay `AbortSignal`: no se puede cancelar una petición en curso.
+- **`AbortSignal` (PR-10)**: el cliente cancela la petición con `AbortController`. `Stop` aborta el fetch y restaura el input; el servidor sigue trabajando hasta completar su bucle (cancelar el fiber del servidor requiere que `HttpServerResponse.stream` propague la desconexión, no verificado en `4.0.0-beta.83`).
 
 ---
 
@@ -72,6 +75,8 @@ El modelo **no** ve el backend. Ve dos funciones (`domain/agents/harness/harness
 
 El system prompt (`harness.ts:52-62`) lista solo **nombres y descripciones de una línea**
 de las skills; el contenido se expande bajo demanda. Las skills son texto, no tools.
+
+**PR-11 (perf/agente-cortocircuito)**: el prompt del tutor se construye **por petición**, no una vez al levantar el layer. Cada llamada a `sendMessage`/`streamMessage` invoca `materialRepository.list()` y construye una sección `## Uploaded materials` con id, título y páginas de cada PDF. Si `list()` falla, el prompt indica que no hay materiales (el chat no cae). El prompt incluye reglas explícitas: responder directamente sin tool call cuando la pregunta es de conocimiento general, saludo, o la información ya está en la conversación; llamar a `materials view` solo con ids del inventario; **nunca** llamar a `materials list`. Esto elimina los dos round-trips innecesarios previos (load_skill + materials list) para preguntas directas. `maxSteps` bajó de 8 a 4 en el tutor (suficiente para `load_skill` + `artifacts create` + respuesta + margen).
 
 El CLI (`harness/cli.ts`, 389 líneas) es un parser propio con `--help`, subcomandos,
 tokenización con comillas y **argumentos posicionales por orden de clave** (no hay
@@ -98,6 +103,23 @@ ejemplo). Una tool nueva se anunciaría a Gemini con un esquema falso.
 El bucle (`harness/session.ts:62-127`) es estrictamente secuencial, `maxSteps` por
 defecto 8, y **usa `generateText` incluso en la ruta de streaming**: lo que se emite son
 mensajes completos, no tokens. Termina cuando un paso no produce tool results.
+
+Cada paso del bucle emite un log `agent.step` con el número de paso, las tool calls
+invocadas, el número de tool results y los primeros 200 caracteres del texto de respuesta
+(`session.ts:95-103`). Cada llamada a la API de Gemini emite un log `gemini.response` con
+`finishReason`, tokens usados y los primeros 200 caracteres del texto de respuesta
+(`gemini.ts`). Ningún log vuelca partes `file` (base64 de páginas de PDF).
+
+Los dos tool handlers tienen timeout de 30 s (`harness.ts`): si se agota, el handler
+devuelve un mensaje de texto al modelo en lugar de dejar el turno colgado.
+
+**PR-12.2 (fix/tool-calls-estructural)**: `renderMessage` ya no existe. Las tool calls viajan como partes estructuradas a través de todo el pipeline:
+
+- `renderPrompt` emite `{ role: "assistant", content: [{ type: "tool-call", id, name, params }] }` y `{ role: "tool", content: [{ type: "tool-result", id, name, isFailure, result }] }` (tipos `Prompt.ToolCallPartEncoded` / `Prompt.ToolResultPartEncoded` de Effect v4 beta).
+- `messageParts` en `gemini.ts` los convierte directamente a `{ functionCall: { name, args } }` / `{ functionResponse: { name, response } }`. No hay regex de sincronización.
+- `ToolCallMessage` guarda el `id` del tool call (`id?: string`). El id codifica la `thoughtSignature` de Gemini como `call_uuid||base64sig` para que sobreviva el transporte opaco de Effect y pueda inyectarse de vuelta en el historial (requerido por Gemini 2.5 Flash / gemini-3.6-flash). Ver `dificultades.md §PR-12.2 — Gemini exige thoughtSignature`.
+
+La causa raíz del bug PR-12 está eliminada. La red de seguridad (`MALFORMED_FUNCTION_CALL` → reintento con `mode:ANY`) sigue activa.
 
 Si el modelo falla, no se propaga: `session.ts:89-93` lo convierte en un mensaje de
 asistente sintético ("I hit an internal model/tool-routing error…") y el stream termina
@@ -155,14 +177,17 @@ que produce un objeto nuevo.
 Se persiste en `.data/artifacts/attempts/<id>.json` desde
 `infra/artifacts/file-artifact-repository.ts:149-155`.
 
-Superficie HTTP: `GET /api/artifacts/`, `GET /api/artifacts/:id` y
-`POST /api/artifacts/:id/submit` (que encadena crear intento + corregir). **No hay
-endpoint de creación de artifacts ni de subida de materiales**: crear artifacts solo se
-puede desde el agente. El repositorio de dominio es bastante más rico que la API.
+Superficie HTTP:
+- `GET /api/materials/` — lista materiales
+- `GET /api/materials/:id` — obtiene un material
+- `DELETE /api/materials/:id` — borra el PDF del disco (**PR-13**). Devuelve 204 si existe, 404 tipado (`{"_tag":"MaterialNotFound","materialId":"..."}`) si no. La ruta se resuelve por listing del repositorio, no por concatenación directa del id: path traversal imposible.
+- `GET /api/artifacts/` — lista artifacts
+- `GET /api/artifacts/:id` — obtiene un artifact
+- `POST /api/artifacts/:id/submit` — encadena crear intento + corregir
 
-Todos los handlers terminan en `Effect.orDie` (`transport/http/handlers.ts`): los errores
-de dominio se convierten en defectos, o sea 500 sin canal de error tipado. Ningún
-endpoint declara `error:` en su schema.
+**No hay endpoint de creación de artifacts**: crear artifacts solo se puede desde el agente.
+
+Los handlers de materiales usan `Effect.catchTag("MaterialRepositoryError", e => Effect.die(e))` para errores de infraestructura y `Effect.fail({...})` para errores de dominio tipados (404). Los demás handlers terminan en `Effect.orDie`: 500 sin canal tipado.
 
 **Los artifacts no guardan de qué material salieron**: no hay `materialId` ni páginas de
 origen. Sin ese enlace, nada puede saber qué texto habría que citar para justificar
@@ -181,8 +206,13 @@ deuda conocida, fuera del alcance de PR-01.
 
 Adaptador escrito a mano, sin SDK: `fetch` contra
 `generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`
-(`domain/agents/gemini.ts:121-122`). Modelo por defecto `gemini-2.5-flash`,
+(`domain/agents/gemini.ts`). Modelo por defecto `gemini-3.6-flash` (**actualizado en sesión 8-sep-2026**; antes `gemini-2.5-flash`),
 configurable con `GEMINI_MODEL`. Sin `GOOGLE_GENERATIVE_AI_API_KEY` el server no arranca.
+
+El adaptador decodifica ahora `finishReason`, `usageMetadata` y `promptFeedback` de la
+respuesta de Gemini. Valores a vigilar: `STOP` (normal), `MAX_TOKENS`, `SAFETY`,
+`RECITATION`, `MALFORMED_FUNCTION_CALL`. Si aparece `thought: true` en alguna parte, el
+modelo está devolviendo resúmenes de razonamiento (no esperado sin `includeThoughts`).
 
 Tres límites que condicionan cualquier diseño:
 
@@ -209,22 +239,30 @@ cuya tercera columna de 420px se la lleva el chat.
 El sidebar mide 252 px. Ningún componente usa clases de color literal de Tailwind;
 todo el color viene de tokens del design system. Ver `documentacion/design-system.md`.
 
-**El estado del chat no está en atoms**: son cuatro `useState` dentro de
-`Chat.tsx:18-24`. `domain/tutor/atoms.ts` contiene un único action que apunta al
-endpoint **no** streaming y **no tiene ni un call site**: código muerto.
+**PR-13 (fix/tool-calls-estructural, sesión 8-sep-2026)**:
+- **Nombre del producto**: `My Favorite Teacher` (pestaña del navegador, logo M, sidebar). Los paquetes siguen siendo `@proxus/*`.
+- **Borrado de materiales**: cada fila del sidebar tiene un botón `×` (siempre visible). El primer clic cambia a `Confirm`; el segundo borra. `Escape` o un clic fuera cancelan. La fila queda a `opacity-50` mientras la petición está en vuelo. Un error se muestra bajo la lista en `text-danger`.
+- **Subida de PDFs**: `PdfUploader` aparece siempre al final de la sección de materiales, independientemente de cuántos PDFs haya ya. (Fix 95e1ef6 — la reescritura del PR-13 lo había eliminado accidentalmente.)
+- **Cerrar artefacto**: `ArtifactWorkspace` tiene un botón `Close` en una cabecera *sticky*. `Escape` también cierra (excepto si el foco está en un `<input>` o `<textarea>`). Pulsar de nuevo el artefacto seleccionado en el sidebar lo cierra (toggle). La conversación del chat no se pierde.
+- `deleteMaterialAction` usa `apiRuntime.fn` con `reactivityKeys: ["materials"]` — el mismo patrón que `submitArtifactAttemptAction`.
+
+**El estado del chat vive en el hook `useTutorChat`** (PR-10, `domain/tutor/use-tutor-chat.ts`). El hook expone `messages`, `input`, `status` (`"idle"|"sending"`), `error`, `canRetry`, y las acciones `submit`, `stop`, `retry`, `clear`, `setInput`. `Chat.tsx` es pura presentación: no contiene lógica de red. `domain/tutor/atoms.ts` contiene un único action que apunta al endpoint **no** streaming y **no tiene ni un call site**: código muerto.
 
 Los atoms que sí se usan son los de datos: `materialsQuery`, `artifactsQuery`,
 `artifactQuery(id)` y `submitArtifactAttemptAction`, todos con
 `Atom.withReactivity`. Cuando llega un tool result de `artifacts create|submit|grade` o
-`materials import|delete|index`, `domain/tutor/invalidation.ts` dispara un refresh
-(`Chat.tsx:49-61`), emparejando call y result con una cola FIFO que asume que no hay
-tool calls en paralelo.
+`materials import|delete|index`, `domain/tutor/invalidation.ts` dispara un refresh, emparejando call y result con una cola FIFO que asume que no hay tool calls en paralelo.
 
-**Observabilidad del razonamiento hoy: prácticamente ninguna.** El botón de enviar
-cambia a `"Thinking…"` (`Chat.tsx:135`) y aparecen filas `<details>` con volcados JSON
-crudos de tool calls y results (`:142-154`), sin distinguir siquiera si el result fue un
-fallo. No hay burbuja de pendiente, ni contador de pasos, ni temporizador, ni botón de
-parar, ni auto-scroll.
+**Ciclo de vida del input (PR-10)**:
+- `setInput("")` ocurre **antes** del primer `await` (en el mismo frame que `submit`), no tras el bucle.
+- El textarea queda `disabled` durante la generación (`aria-busy`), con cursor `not-allowed` y placeholder *"Waiting for the tutor…"*.
+- El botón conmuta entre `Send` (idle) y `Stop` (sending). `Stop` nunca va `disabled`.
+- Un aborto restaura el texto al textarea sin mostrar error.
+- Un fallo deshace los mensajes parciales (vuelve al historial previo al envío) y restaura el texto. Si `canRetry` es `true`, aparece un botón `Retry`.
+- `Enter` envía; `Shift+Enter` inserta salto de línea. Guard de IME (`isComposing`).
+- Mientras `status === "sending"` y el último mensaje no es `assistant`, se muestra una burbuja de puntos animados (`animate-pulse`).
+- El hook registra un `useEffect` de desmontaje con `abortRef.current?.abort()`.
+- El contador de pasos, temporizador y auto-scroll son del PR-07.
 
 El flujo de resolver un ejercicio está en `ArtifactWorkspace.tsx` (380 líneas): respuestas
 en estado local, `submit` vía `submitArtifactAttemptAction` en modo promesa, y al volver
