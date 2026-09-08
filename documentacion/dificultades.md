@@ -341,3 +341,29 @@ El usuario pierde la vista parcial del stream, pero el modelo recibirá un histo
 **Solución**: pasar `"No PDF materials have been uploaded yet."` como tercer argumento en el eval. El eval no sube PDFs, así que el inventario vacío es correcto.
 
 **Descartado**: hacer `materialsContext` opcional con valor por defecto (habría enmascarado otros callsites olvidados).
+
+---
+
+## Testing automático — PR-10 y PR-11 (sesión 8-sep-2026)
+
+### `packages/web` no tenía test runner; se añadió vitest de forma mínima
+
+**Síntoma**: `isAbortError` (PR-10) era una función pura exportable pero no había forma de ejecutar tests en el paquete web.
+
+**Causa**: el setup inicial del repo no instaló vitest en `packages/web` porque no había nada que testear. El PR-13 instaló vitest solo en `packages/server`.
+
+**Solución**: añadir `vitest@^5.0.0` a `devDependencies` de `packages/web`, un `vitest.config.ts` mínimo (`environment: "node"`) y los scripts `test`/`test:watch`. Los tests de componentes React (que necesitan `@testing-library/react` y un DOM) se dejan para cuando haya cobertura de presentación. Solo se testean funciones puras.
+
+**Descartado**: mover `isAbortError` al paquete `packages/server` o `packages/shared` para aprovechar el runner ya existente (rompe la cohesión: la función vive donde se usa).
+
+---
+
+### Inline helper `makeSession` bloqueaba el test de `buildMaterialsContext`
+
+**Síntoma**: el builder del inventario era un bloque de código dentro del cuerpo de un `Effect.gen`, sin nombre ni export. Imposible de testear sin montar un `Layer` con mocks.
+
+**Causa**: la lógica fue escrita inline para no añadir exports innecesarios en PR-11. Correcto para producción, pero opaco para tests.
+
+**Solución**: extraer la lógica a `export const buildMaterialsContext = (materials: ReadonlyArray<...>): string => ...` justo antes de `TutorChatServiceLive`. Es una función pura de datos; el export no expone estado ni efectos.
+
+**Descartado**: testear vía `Layer` con repositorio en memoria (mucho más código de test para el mismo grado de confianza sobre una transformación de strings).
