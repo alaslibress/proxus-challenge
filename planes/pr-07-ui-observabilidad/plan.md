@@ -42,8 +42,11 @@ que no lo están.
 - Rediseño visual del producto. La Tech Spec §4 es explícita: *"el objetivo en UI no es un
   rediseño visual, sino Observabilidad del Razonamiento"*. Se respeta el aspecto actual,
   Tailwind v4 y el `color-scheme: dark` de `styles.input.css`.
-- El chat. `Chat.tsx` ya recibió en el PR-05 el cambio mínimo para no romperse y **no se
-  toca más**.
+- El chat. El PR-05 ya hizo el cambio mínimo para que no se rompa, y **no lo hizo en
+  `Chat.tsx`**: la lógica de estado y el bucle de eventos del stream viven desde el PR-10 en
+  el hook `packages/web/src/domain/tutor/use-tutor-chat.ts:56-75`, y `Chat.tsx` quedó como
+  presentación pura (su única línea de lógica es `const chat = useTutorChat();`,
+  `Chat.tsx:13`). **No se toca ninguno de los dos en este PR.**
 - Streaming de tokens. No existe (`streamText` es `Stream.empty`).
 - Multiple-choice y true-false: se corrigen igual que siempre y no pasan por el panel.
 - Subida de PDFs, rutas, router, o cualquier endpoint nuevo.
@@ -126,7 +129,12 @@ Trampa fácil de pasar por alto. `submitArtifactAttemptAction`
 atoms de artifacts sola. **El stream del PR-05 va por `fetch` crudo y no dispara nada.**
 
 - [ ] Tras recibir el frame `done`, refrescar a mano con `useAtomRefresh(artifactsQuery)`,
-      exactamente el mismo mecanismo que ya usa `Chat.tsx:22-23` tras un tool result.
+      exactamente el mismo mecanismo que ya usa el chat tras un tool result. **Ese código
+      ya no está en `Chat.tsx`**: desde el PR-10 vive en el hook
+      `packages/web/src/domain/tutor/use-tutor-chat.ts`, que declara los refrescos en
+      `:33-34` (`useAtomRefresh(artifactsQuery)` y `useAtomRefresh(materialsQuery)`) y los
+      dispara en `:69-74` al llegar un `tool-result` que no es fallo, vía
+      `applyInvalidations` (`domain/tutor/invalidation.ts:31`). Es el patrón a copiar.
 - [ ] De paso, limpiar el ternario muerto de `atoms.ts:37-45`: sus dos ramas son idénticas.
 
 ### Paso 4 — Degradación si el streaming no está disponible
@@ -163,7 +171,9 @@ atoms de artifacts sola. **El stream del PR-05 va por `fetch` crudo y no dispara
       de barras de progreso ni porcentajes: **no sabemos cuánto falta**, y fingirlo sería
       mentir. Tampoco cuenta atrás.
 - [ ] Contenedor con `aria-live="polite"` y `aria-busy={true}`, siguiendo lo que ya hace
-      la lista de mensajes del chat (`Chat.tsx:89`).
+      la lista de mensajes del chat (`Chat.tsx:49`). Esta referencia a `Chat.tsx` **es
+      correcta**: es presentación, no estado, y ese atributo sigue ahí. (El `aria-busy` del
+      chat está en el `textarea`, `Chat.tsx:148`, no en la lista.)
 - [ ] Botón **Cancelar** que aborte el `AbortController` que el PR-05 dejó preparado en
       `readNdjson`. Al cancelar se vuelve a `phase: "idle"` con los inputs habilitados.
 
@@ -204,8 +214,9 @@ Reglas de honestidad visual, y son el criterio de diseño de todo el PR:
       observabilidad deja de ser cierta para el workspace. Ajustar, **manteniendo** lo que
       sigue siendo verdad del chat.
 - [ ] `planes/plan.md` §9: actualizar el límite duro **"El estado del chat no está en
-      atoms"**, precisando que sigue siendo cierto para `Chat.tsx` y ya no para el
-      workspace. Referenciar por texto y no por número: la lista se renumera.
+      atoms"**, precisando que sigue siendo cierto para el chat —vive en cinco `useState`
+      dentro de `domain/tutor/use-tutor-chat.ts:27-31`, no en `Chat.tsx` y no en atoms— y ya
+      no para el workspace. Referenciar por texto y no por número: la lista se renumera.
 
 ## Criterio de aceptación
 
@@ -273,5 +284,17 @@ pnpm run dev
 
 ## Historial
 
-_Sin cambios todavía. El thinker anota aquí cualquier corrección al plan que venga del
-doer, con fecha y motivo._
+- **Referencias a `Chat.tsx` puestas al día tras el PR-10.** El PR-10 movió el estado y el
+  bucle de eventos del chat a `packages/web/src/domain/tutor/use-tutor-chat.ts` y dejó
+  `Chat.tsx` como presentación pura (`Chat.tsx:13`). Corregidos tres puntos:
+  - *Fuera de alcance*, bullet del chat: el cambio mínimo del PR-05 se hace en el hook, no
+    en `Chat.tsx`.
+  - *Paso 3*: el patrón de `useAtomRefresh` a copiar está en `use-tutor-chat.ts:33-34` y
+    `:69-74` (vía `invalidation.ts:31`), no en `Chat.tsx:22-23`.
+  - *Paso 7*: el límite duro de `planes/plan.md` §9 sobre el estado del chat se precisa
+    contra `use-tutor-chat.ts:27-31`.
+  **No se ha tocado** la referencia del *Paso 5* al `aria-live` de la lista de mensajes: es
+  presentación legítima y sigue en `Chat.tsx`; solo se corrigió el número de línea
+  (`:89` → `:49`).
+
+_El thinker anota aquí cualquier corrección al plan que venga del doer, con fecha y motivo._

@@ -1,8 +1,10 @@
-import { Effect } from "effect";
+import { Effect, Queue, Stream } from "effect";
 import { LanguageModel } from "effect/unstable/ai";
 import type {
   Artifact,
   ArtifactAttempt,
+  AttemptEvaluationStage,
+  AttemptStreamEvent,
   QuestionCorrection,
   ShortAnswerCorrection,
   TestQuestion
@@ -32,7 +34,8 @@ const evidenceForQuestion = (
 const reviewCorrection = (
   artifact: Artifact,
   correction: ShortAnswerCorrection,
-  studentAnswer: string
+  studentAnswer: string,
+  emit?: (stage: AttemptEvaluationStage) => Effect.Effect<void>
 ): Effect.Effect<
   ShortAnswerCorrection,
   never,
@@ -79,7 +82,7 @@ const reviewCorrection = (
     studentAnswer,
     materialId,
     evidence: nonEmptyPages
-  }).pipe(
+  }, emit).pipe(
     Effect.match({
       onFailure: () => undefined,
       onSuccess: (value) => value
@@ -135,3 +138,76 @@ export const reviewGradedAttempt = (
     corrections
   };
 });
+
+const executeStreaming = (
+  artifact: Artifact,
+  attempt: ArtifactAttempt,
+  emit: (event: AttemptStreamEvent) => Effect.Effect<void>
+): Effect.Effect<void, never, EvaluationEngineService | MaterialRepository | LanguageModel.LanguageModel> =>
+  Effect.gen(function* () {
+    if (attempt.status !== "graded" || attempt.artifactKind !== "test") {
+      yield* emit({ type: "done", payload: attempt });
+      return;
+    }
+
+    // Only short-answer corrections with a matching short-answer answer are ever routed
+    // to the engine (see reviewCorrection). questionIndex/questionTotal count that subset,
+    // not all corrections, so the UI can show accurate progress across the questions that
+    // actually go through evaluation.
+    const questionIndexById = new Map<string, number>();
+    let total = 0;
+    for (const correction of attempt.corrections) {
+      if (correction.questionType !== "short-answer") continue;
+      const answer = attempt.answers.find((candidate) => candidate.questionId === correction.questionId);
+      if (answer === undefined || answer.questionType !== "short-answer") continue;
+      questionIndexById.set(correction.questionId, total);
+      total++;
+    }
+
+    const reviewOne = (
+      correction: QuestionCorrection
+    ): Effect.Effect<QuestionCorrection, never, EvaluationEngineService | MaterialRepository | LanguageModel.LanguageModel> => {
+      if (correction.questionType !== "short-answer") {
+        return Effect.succeed(correction);
+      }
+
+      const questionIndex = questionIndexById.get(correction.questionId);
+      const answer = attempt.answers.find(
+        (candidate) => candidate.questionId === correction.questionId
+      );
+
+      if (questionIndex === undefined || answer === undefined || answer.questionType !== "short-answer") {
+        return Effect.succeed(correction);
+      }
+
+      const stageEmit = (stage: AttemptEvaluationStage) => emit({
+        type: "status",
+        value: stage,
+        questionId: correction.questionId,
+        questionIndex,
+        questionTotal: total
+      });
+
+      return reviewCorrection(artifact, correction, answer.answer, stageEmit);
+    };
+
+    const corrections: QuestionCorrection[] = yield* Effect.forEach(attempt.corrections, reviewOne);
+
+    yield* emit({ type: "done", payload: { ...attempt, corrections } });
+  });
+
+export const reviewGradedAttemptStreaming = (
+  artifact: Artifact,
+  attempt: ArtifactAttempt
+): Stream.Stream<AttemptStreamEvent, never, EvaluationEngineService | MaterialRepository | LanguageModel.LanguageModel> =>
+  Stream.callback<AttemptStreamEvent, never, EvaluationEngineService | MaterialRepository | LanguageModel.LanguageModel>(
+    (queue) =>
+      executeStreaming(artifact, attempt, (event) => Queue.offer(queue, event).pipe(Effect.asVoid)).pipe(
+        Effect.andThen(Queue.end(queue)),
+        Effect.catchCause((cause) =>
+          Queue.offer(queue, { type: "error", message: String(cause) }).pipe(
+            Effect.andThen(Queue.end(queue))
+          )
+        )
+      )
+  );
