@@ -303,3 +303,41 @@ El usuario pierde la vista parcial del stream, pero el modelo recibirá un histo
 **Solución**: esperar al reseteo diario (medianoche UTC). No hay solución técnica sin cambiar de plan. El QA del agente (PR-12.2 + thoughtSignature) se ejecuta al día siguiente.
 
 **Descartado**: cambiar el modelo mid-session para usar el cupo de otro modelo (cambia el comportamiento y no es QA del cambio implementado).
+
+---
+
+## PR-11 — Cortocircuito de herramientas y latencia percibida
+
+### El harness se construía una vez en el layer, haciendo el prompt estático
+
+**Síntoma**: el inventario de materiales en el prompt no reflejaba PDFs subidos durante la sesión; era el listado del momento de arranque del servidor. Además, si no había materiales al arrancar, el agente nunca lo sabía sin gastar un round-trip.
+
+**Causa**: `TutorChatServiceLive` era un `Layer.effect` que construía `makeAcademicTutorHarness` **una sola vez** al crear el layer. El sistema prompt (el campo `name` de `AgentHarness.make`) era una cadena estática capturada en ese momento.
+
+**Solución**: mover la construcción del harness y la sesión a un helper `makeSession` ejecutado por petición dentro de `sendMessage` y `streamMessage`. Cada petición llama a `materialRepository.list()` (con `Effect.orElseSucceed(() => [])` para que un fallo de disco no tumbe el chat) y construye el prompt con el inventario fresco.
+
+**Descartado**: inyectar el inventario como header HTTP o como primer mensaje del usuario (viola el contrato `TutorChatRequest`).
+
+---
+
+### `Stream.unwrap` disponible en effect@4.0.0-beta.83
+
+**Síntoma**: el plan señalaba que había que verificar si `Stream.unwrap` existía antes de usarlo.
+
+**Causa**: el plan asumía incertidumbre sobre la API de Effect v4 beta.
+
+**Solución**: verificado con grep en `node_modules/.pnpm/effect@4.0.0-beta.83/.../Stream.js`: `export const unwrap = effect => fromChannel(Channel.unwrap(...))` existe. Se usa en `streamMessage` para desplegar el `Effect<Stream<...>>` que devuelve `makeSession`.
+
+**Descartado**: `Stream.flatMap(Stream.fromEffect(makeSession), ...)` (más verboso, innecesario).
+
+---
+
+### `makeAcademicTutorHarness` en eval necesitaba el tercer parámetro
+
+**Síntoma**: `artifact-authoring.eval.ts:411` generaba TS2554 ("Expected 3 arguments, but got 2") tras añadir `materialsContext` a la firma.
+
+**Causa**: el eval construye el harness directamente con repositorios en memoria y no pasa por `TutorChatService`.
+
+**Solución**: pasar `"No PDF materials have been uploaded yet."` como tercer argumento en el eval. El eval no sube PDFs, así que el inventario vacío es correcto.
+
+**Descartado**: hacer `materialsContext` opcional con valor por defecto (habría enmascarado otros callsites olvidados).
