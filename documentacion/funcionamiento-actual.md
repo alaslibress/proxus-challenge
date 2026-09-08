@@ -317,9 +317,32 @@ Los atoms que sí se usan son los de datos: `materialsQuery`, `artifactsQuery`,
 - El hook registra un `useEffect` de desmontaje con `abortRef.current?.abort()`.
 - El contador de pasos, temporizador y auto-scroll son del PR-07.
 
-El flujo de resolver un ejercicio está en `ArtifactWorkspace.tsx` (380 líneas): respuestas
-en estado local, `submit` vía `submitArtifactAttemptAction` en modo promesa, y al volver
-`graded` se pintan badges y explicaciones por pregunta más un resumen de nota.
+**PR-07 (feat/ui-observabilidad): el workspace consume el streaming NDJSON del PR-05.**
+`ExerciseSolver` (`ArtifactWorkspace.tsx`) ya no guarda `attempt`/`error`/`isSubmitting`
+en `useState`: viven en `evaluationRunAtom(artifactId)`
+(`domain/artifacts/evaluation-atoms.ts`), un `Atom.family` con las fases
+`idle | running | done | error`. `answers` sigue siendo `useState`: es buffer de
+formulario, no estado de razonamiento a observar. Al enviar, `submit()` consume
+`streamAttemptSubmission` (PR-05, `domain/artifacts/attempt-stream.ts`) con un
+`AbortController` propio; los frames `status` acumulan `activeStages` (Profe Bueno y
+Profe Malo activos a la vez, sustituidos por el Juez en `deliberating`), `done` pasa a
+`phase: "done"` y dispara `useAtomRefresh(artifactsQuery)` a mano —el `fetch` crudo del
+streaming no lleva `reactivityKeys`, a diferencia de `submitArtifactAttemptAction`—, y
+`error` pasa a `phase: "error"`. Si el `fetch` falla antes del primer frame (streaming
+caído), cae a `submitArtifactAttemptAction` (modo promesa) como red de seguridad. El
+panel en curso se pinta con `EvaluationProgress`
+(`components/evaluation/EvaluationProgress.tsx`): tres filas fijas, `aria-live="polite"`,
+sin porcentajes ni tiempos, y un botón Cancelar que aborta el stream y vuelve a `idle`.
+El feedback del Juez se pinta con `ShortAnswerDetails`/`CitationList`
+(`components/evaluation/CitationList.tsx`): las citas `verified: false` no llevan página
+y se distinguen visualmente (color e icono distintos) de las verificadas, y si ninguna
+cita quedó verificada se avisa que la nota es la automática. Multiple-choice y
+true-false no cambian: no pasan por `review`.
+
+El flujo de resolver un ejercicio está en `ArtifactWorkspace.tsx`: respuestas
+en estado local, `submit` vía el streaming (con fallback a `submitArtifactAttemptAction`
+en modo promesa), y al volver `graded` se pintan badges, explicaciones por pregunta,
+feedback del Juez y citas, más un resumen de nota.
 
 Gotcha de build: `vite.config.ts` tiene `root: "src"`, así que un directorio
 `src/api/` se serviría como estático y **taparía el proxy `^/api(?:/|$)`**. Por eso el
@@ -360,7 +383,7 @@ Lo que la Tech Spec da por hecho y no existe:
 | Refactorizar `TutorChatService` para el trío | En el chat no hay "correcciones" que citar. Las correcciones están en `artifact.ts`. |
 | Zod / `@effect/schema` | Ni Zod ni `@effect/schema`: `Schema` del barrel `effect` v4 beta. |
 | `packages/client/` | No existe. Es `packages/web/`. |
-| "Actualizar los Effect Atom" del chat | El estado del chat no está en atoms, está en `useState`. |
+| "Actualizar los Effect Atom" del chat | Sigue siendo cierto para el chat: vive en cinco `useState` dentro de `domain/tutor/use-tutor-chat.ts`, no en `Chat.tsx` y no en atoms. **Ya no es cierto para el workspace** (PR-07): el estado de la evaluación vive en `evaluationRunAtom` (`Atom.family`), aunque `answers` sigue en `useState` a propósito. |
 | Streaming de razonamiento | `streamText` es `Stream.empty`. Solo hay eventos de mensaje completo. |
 
 Y dos cosas más que hay que saber antes de probar nada:

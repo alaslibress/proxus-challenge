@@ -53,6 +53,33 @@ pnpm --filter @proxus/server run agent:tutor "Crea un quiz corto de una pregunta
    - aparece la marca `Stopped` y no hay error ni `Retry`,
    - en la consola del server, el `http.span` cierra en ese instante y no llegan más
      `agent.step` de ese turno.
+10. Flujo de respuesta corta con panel (PR-07, requiere un PDF con capa de texto en
+    `packages/server/.data/materials/pdfs/`):
+    - Pide al tutor un **test** con tres preguntas de respuesta corta de la misma página.
+    - Responde: una paráfrasis correcta, una equivocada y una en blanco. Envía.
+    - Observa el panel de progreso: **Profe Bueno** y **Profe Malo** activos a la vez,
+      luego **Juez deliberando**, y el contador *"Pregunta N de M"* avanzando. Sin barras
+      de progreso ni porcentajes.
+    - Pulsa **Cancelar** en mitad de otro envío: el formulario vuelve a ser editable y no
+      queda ningún estado colgado (ni `isSubmitting`, ni error fantasma).
+    - Al terminar, revisa por cada `short-answer`: el feedback razonado del Juez, y sus
+      citas.
+    - Comprueba las citas:
+      - una `verified: true` sale con su página, contrástala abriendo el PDF por esa
+        página;
+      - una `verified: false` sale visualmente distinta (color e icono distintos) con el
+        texto *"Sin verificar en el PDF"* y **sin número de página**.
+      - si ninguna cita quedó verificada, aparece el aviso *"Evaluación orientativa: no
+        se pudo verificar ninguna cita, la nota es la automática."*.
+    - Con `GEMINI_MODEL` apuntando a un modelo inexistente, repite el envío: debe salir
+      la corrección determinista sin `review` y sin romper el layout.
+    - Con el endpoint de streaming caído (o inaccesible), el envío debe seguir
+      funcionando por la ruta tipada (`submitArtifactAttemptAction`), sin panel de
+      progreso.
+    - Multiple-choice y true-false deben verse y comportarse exactamente igual que
+      siempre: no pasan por el panel.
+    - Un artifact `test` creado antes de PR-04 (sin `source`, sin `review` posible) se
+      corrige y se renderiza sin huecos ni errores.
 
 ## Qué reportar en una entrega
 

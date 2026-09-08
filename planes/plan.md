@@ -266,7 +266,10 @@ Verificados en el código. Están desarrollados en
    `responseMimeType` y `responseSchema` son inalcanzables hoy.
 4. **`streamText` es `Stream.empty`**: no hay streaming de tokens. Solo eventos de
    mensaje completo. La UI muestra fases discretas, no texto token a token.
-5. **El estado del chat no está en atoms**, está en `useState` dentro de `Chat.tsx`.
+5. **El estado del chat no está en atoms**, sigue en `useState` —cinco de ellos, dentro
+   de `domain/tutor/use-tutor-chat.ts`, no en `Chat.tsx`—. **Ya no es cierto para el
+   workspace** (PR-07 ui-observabilidad): el estado de la evaluación de un intento vive
+   en `evaluationRunAtom`, un `Atom.family` en `domain/artifacts/evaluation-atoms.ts`.
 6. ~~El cliente NDJSON decodifica en estricto~~ **Eliminado desde PR-05**: `readNdjson`
    (`packages/web/src/lib/ndjson.ts`) envuelve cada línea en `try/catch` y salta la que no
    decodifica con un `console.warn`, en vez de reventar el generador entero.
