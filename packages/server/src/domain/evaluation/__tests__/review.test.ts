@@ -12,7 +12,17 @@ import type {
 import { MaterialRepository, MaterialRepositoryError, type PageText } from "../../materials/material.ts";
 import { EvaluationEngineService } from "../engine.ts";
 import { EvaluationUnavailable } from "../errors.ts";
+import { EvaluationTrace, type EvaluationTraceEntry } from "../trace.ts";
 import { reviewGradedAttempt } from "../review.ts";
+
+const recordedTraces: EvaluationTraceEntry[] = [];
+
+const fakeTrace = Layer.succeed(EvaluationTrace)({
+  record: (entry) => {
+    recordedTraces.push(entry);
+    return Effect.void;
+  }
+});
 
 // Fake MaterialRepository: only extractText is exercised by review.ts, and unit tests
 // should not depend on real PDFs/Poppler, matching file-material-repository.test.ts.
@@ -56,23 +66,52 @@ const makeFakeEngine = (
 ) =>
   Layer.succeed(EvaluationEngineService)({
     evaluate: (input) => {
+      const traceBase = {
+        questionId: input.questionId,
+        questionPrompt: input.questionPrompt,
+        expectedAnswer: input.expectedAnswer,
+        studentAnswer: input.studentAnswer,
+        materialId: input.materialId,
+        pages: input.pages,
+        evidence: input.evidence,
+        goodTeacher: { ok: true as const, text: "bien" },
+        badTeacher: { ok: true as const, text: "mal" },
+        durationMs: 1
+      };
+
       if (behavior.kind === "fail") {
         return Effect.fail(
-          new EvaluationUnavailable({ reason: "panel unavailable", stage: "judge" })
+          new EvaluationUnavailable({
+            reason: "panel unavailable",
+            stage: "judge",
+            trace: {
+              ...traceBase,
+              judge: { failed: "panel unavailable" },
+              citations: []
+            }
+          })
         ) as unknown as ReturnType<EvaluationEngineService["evaluate"]>;
       }
       const verified = input.evidence.some((page) => page.text.includes(behavior.quote));
+      const citas_pdf = [
+        {
+          materialId: input.materialId,
+          page: verified ? input.evidence[0]?.page ?? 0 : 0,
+          quote: behavior.quote,
+          verified
+        }
+      ];
       return Effect.succeed({
-        is_correct: behavior.is_correct,
-        feedback: "Feedback consolidado del panel.",
-        citas_pdf: [
-          {
-            materialId: input.materialId,
-            page: verified ? input.evidence[0]?.page ?? 0 : 0,
-            quote: behavior.quote,
-            verified
-          }
-        ]
+        feedback: {
+          is_correct: behavior.is_correct,
+          feedback: "Feedback consolidado del panel.",
+          citas_pdf
+        },
+        trace: {
+          ...traceBase,
+          judge: { is_correct: behavior.is_correct, feedback: "Feedback consolidado del panel.", citas_pdf: [behavior.quote] },
+          citations: citas_pdf
+        }
       }) as unknown as ReturnType<EvaluationEngineService["evaluate"]>;
     }
   });
@@ -123,12 +162,13 @@ const gradedAttempt: GradedTestAttempt = {
 const run = (
   artifact: Artifact,
   attempt: ArtifactAttempt,
-  layers: Layer.Layer<EvaluationEngineService | MaterialRepository | LanguageModel.LanguageModel>
+  layers: Layer.Layer<EvaluationEngineService | MaterialRepository | LanguageModel.LanguageModel | EvaluationTrace>
 ) => Effect.runPromise(reviewGradedAttempt(artifact, attempt).pipe(Effect.provide(layers)));
 
 describe("reviewGradedAttempt", () => {
   it("never fails even if the evaluation panel fails — returns the attempt unmodified", async () => {
     const layers = Layer.mergeAll(
+      fakeTrace,
       makeFakeEngine({ kind: "fail" }),
       makeFakeMaterialRepository({}),
       noLanguageModelNeeded
@@ -142,6 +182,7 @@ describe("reviewGradedAttempt", () => {
   it("raises the grade when the judge's citation is a verified literal quote from the extracted text", async () => {
     const pageText = "La fotosíntesis convierte luz solar en energía química de forma continua.";
     const layers = Layer.mergeAll(
+      fakeTrace,
       makeFakeEngine({
         kind: "succeed",
         is_correct: true,
@@ -162,6 +203,7 @@ describe("reviewGradedAttempt", () => {
   it("does NOT raise the grade when the citation is invented/unverifiable against the real text", async () => {
     const pageText = "La fotosíntesis convierte luz solar en energía química de forma continua.";
     const layers = Layer.mergeAll(
+      fakeTrace,
       makeFakeEngine({
         kind: "succeed",
         is_correct: true,
@@ -184,6 +226,7 @@ describe("reviewGradedAttempt", () => {
   it("does NOT raise the grade when the panel says is_correct but the citation is unverified", async () => {
     const pageText = "Texto de la página sin relación con la cita inventada.";
     const layers = Layer.mergeAll(
+      fakeTrace,
       makeFakeEngine({
         kind: "succeed",
         is_correct: true,
@@ -209,6 +252,7 @@ describe("reviewGradedAttempt", () => {
       answers: gradedAttempt.answers
     };
     const layers = Layer.mergeAll(
+      fakeTrace,
       makeFakeEngine({ kind: "fail" }),
       makeFakeMaterialRepository({}),
       noLanguageModelNeeded
@@ -222,6 +266,7 @@ describe("reviewGradedAttempt", () => {
   it("passes through unchanged when the artifact has no source (no materialId to fetch text from)", async () => {
     const artifactWithoutSource: TestArtifact = { ...testArtifact, source: undefined };
     const layers = Layer.mergeAll(
+      fakeTrace,
       makeFakeEngine({
         kind: "succeed",
         is_correct: true,
@@ -239,6 +284,7 @@ describe("reviewGradedAttempt", () => {
 
   it("passes through unchanged when extractText fails for the material", async () => {
     const layers = Layer.mergeAll(
+      fakeTrace,
       makeFakeEngine({
         kind: "succeed",
         is_correct: true,
@@ -256,6 +302,7 @@ describe("reviewGradedAttempt", () => {
 
   it("passes through unchanged when the extracted page text is blank (no extractable text layer)", async () => {
     const layers = Layer.mergeAll(
+      fakeTrace,
       makeFakeEngine({
         kind: "succeed",
         is_correct: true,

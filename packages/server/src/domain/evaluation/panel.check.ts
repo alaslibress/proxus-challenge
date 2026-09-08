@@ -3,7 +3,9 @@ import { LanguageModel } from "effect/unstable/ai";
 import { GeminiModel } from "../agents/gemini.ts";
 import { FileMaterialRepository } from "../../infra/materials/file-material-repository.ts";
 import { PopplerPdfService } from "../../infra/materials/poppler-pdf-service.ts";
+import { FileEvaluationTrace } from "../../infra/evaluation/file-evaluation-trace.ts";
 import { MaterialRepository } from "../materials/material.ts";
+import { EvaluationTrace } from "./trace.ts";
 import { EvaluationEngineService, EvaluationEngineServiceLive } from "./engine.ts";
 import {
   goodTeacherPrompt,
@@ -25,14 +27,17 @@ const program = Effect.gen(function* () {
   const page = Number(pageArg);
   const materialRepository = yield* MaterialRepository;
   const engine = yield* EvaluationEngineService;
+  const trace = yield* EvaluationTrace;
 
   const { pages } = yield* materialRepository.extractText(materialId, [page]);
 
   const input = {
+    questionId: "panel-check",
     questionPrompt: "(panel:check) Evalúa la respuesta corta del alumno.",
     expectedAnswer,
     studentAnswer,
     materialId,
+    pages: [page],
     evidence: pages
   };
 
@@ -65,16 +70,26 @@ const program = Effect.gen(function* () {
   const result = yield* engine.evaluate(input);
 
   yield* Console.log("\n=== Juez (JSON final) ===");
-  yield* Console.log(JSON.stringify(result, null, 2));
+  yield* Console.log(JSON.stringify(result.feedback, null, 2));
 
-  return result;
+  yield* trace.record({
+    ...result.trace,
+    attemptId: `panel-check-${Date.now()}`,
+    artifactId: "panel-check",
+    deterministicScore: 0,
+    finalScore: result.feedback.is_correct ? 1 : 0,
+    scoreOverridden: result.feedback.is_correct
+  });
+
+  return result.feedback;
 }).pipe(
   Effect.provide(Layer.mergeAll(
     EvaluationEngineServiceLive,
     GeminiModel,
     FileMaterialRepository.layer(".data/materials/pdfs").pipe(
       Layer.provide(PopplerPdfService.layer)
-    )
+    ),
+    FileEvaluationTrace.layer(".data/sessions")
   ))
 );
 

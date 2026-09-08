@@ -8,6 +8,8 @@ El server usa storage local bajo `packages/server/.data`. Esa carpeta está igno
 packages/server/.data/
   agent-sessions/
     <sessionId>.json
+  sessions/
+    <attemptId>.md
   artifacts/
     artifacts/
       <artifactId>.json
@@ -17,6 +19,16 @@ packages/server/.data/
     pdfs/
       *.pdf
 ```
+
+`agent-sessions/` y `sessions/` no son lo mismo, aunque el nombre se parece:
+
+- `agent-sessions/` guarda las conversaciones de chat con el tutor
+  (`infra/agents/file-session-repository.ts`).
+- `sessions/` guarda la traza de auditoría de cada corrección de test: un Markdown por
+  `attemptId` con lo que dijo cada profe del panel, el JSON del Juez y la tabla de citas
+  verificadas (`infra/evaluation/file-evaluation-trace.ts`). Se escribe fuera del camino
+  crítico de la respuesta HTTP, así que puede tardar unos milisegundos en aparecer tras
+  terminar la corrección.
 
 ## Materials
 
