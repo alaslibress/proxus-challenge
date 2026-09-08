@@ -1,4 +1,4 @@
-import { useAtomSet, useAtomValue } from "@effect/atom-react";
+import { useAtom, useAtomRefresh, useAtomSet, useAtomValue } from "@effect/atom-react";
 import type {
   Artifact,
   ArtifactAttempt,
@@ -8,10 +8,14 @@ import type {
   SubmitAttemptInput,
   TestQuestion
 } from "@proxus/shared";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Streamdown } from "streamdown";
 import * as AsyncResult from "effect/unstable/reactivity/AsyncResult";
-import { artifactQuery, submitArtifactAttemptAction } from "../domain/artifacts/atoms.ts";
+import { artifactQuery, artifactsQuery, submitArtifactAttemptAction } from "../domain/artifacts/atoms.ts";
+import { streamAttemptSubmission } from "../domain/artifacts/attempt-stream.ts";
+import { evaluationRunAtom } from "../domain/artifacts/evaluation-atoms.ts";
+import { EvaluationProgress } from "./evaluation/EvaluationProgress.tsx";
+import { ShortAnswerDetails } from "./evaluation/CitationList.tsx";
 
 type Answers = Record<string, string>;
 
@@ -158,10 +162,14 @@ function NoteViewer({ artifact }: { readonly artifact: Extract<Artifact, { reado
 
 function ExerciseSolver({ artifact }: { readonly artifact: Extract<Artifact, { readonly kind: "quiz" | "test" }> }) {
   const [answers, setAnswers] = useState<Answers>({});
-  const [attempt, setAttempt] = useState<ArtifactAttempt | null>(null);
-  const [error, setError] = useState<string | undefined>();
-  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [run, setRun] = useAtom(evaluationRunAtom(artifact.id));
   const submitAttempt = useAtomSet(submitArtifactAttemptAction, { mode: "promise" });
+  const refreshArtifacts = useAtomRefresh(artifactsQuery);
+  const abortRef = useRef<AbortController | undefined>(undefined);
+
+  const attempt = run.phase === "done" ? run.attempt : null;
+  const isSubmitting = run.phase === "running";
+  const error = run.phase === "error" ? run.message : undefined;
 
   const unansweredQuestions = useMemo(
     () => artifact.questions.filter((question) => (answers[question.id] ?? "").trim().length === 0),
@@ -172,23 +180,75 @@ function ExerciseSolver({ artifact }: { readonly artifact: Extract<Artifact, { r
     setAnswers((current) => ({ ...current, [questionId]: value }));
   };
 
+  const submitViaTypedEndpoint = async (payload: SubmitAttemptInput) => {
+    try {
+      const result = await submitAttempt(payload);
+      setRun({ phase: "done", attempt: result });
+      refreshArtifacts();
+    } catch (cause) {
+      setRun({ phase: "error", message: cause instanceof Error ? cause.message : String(cause) });
+    }
+  };
+
   const submit = async () => {
-    if (unansweredQuestions.length > 0 || isSubmitting) {
+    if (unansweredQuestions.length > 0 || run.phase === "running") {
       return;
     }
 
-    setIsSubmitting(true);
-    setError(undefined);
+    const payload = buildSubmitInput(artifact, answers);
+    const controller = new AbortController();
+    abortRef.current = controller;
+    setRun({ phase: "running", activeStages: [], questionId: "", questionIndex: 0, questionTotal: 0 });
 
     try {
-      const payload = buildSubmitInput(artifact, answers);
-      const result = await submitAttempt(payload);
-      setAttempt(result);
+      let sawDone = false;
+      for await (const event of streamAttemptSubmission(artifact.id, payload, controller.signal)) {
+        if (event.type === "status") {
+          setRun((current) => {
+            if (current.phase !== "running") return current;
+            const activeStages = event.questionId !== current.questionId || current.activeStages.length === 0
+              ? [event.value]
+              : event.value === "deliberating"
+                ? [event.value]
+                : [...current.activeStages, event.value];
+            return {
+              phase: "running",
+              activeStages,
+              questionId: event.questionId,
+              questionIndex: event.questionIndex,
+              questionTotal: event.questionTotal
+            };
+          });
+        } else if (event.type === "done") {
+          sawDone = true;
+          setRun({ phase: "done", attempt: event.payload });
+          refreshArtifacts();
+        } else if (event.type === "error") {
+          setRun({ phase: "error", message: event.message });
+        }
+      }
+
+      if (!sawDone && controller.signal.aborted === false) {
+        setRun((current) => current.phase === "running"
+          ? { phase: "error", message: "The evaluation stream ended unexpectedly. Try again." }
+          : current);
+      }
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : String(cause));
+      if (controller.signal.aborted) {
+        setRun({ phase: "idle" });
+        return;
+      }
+
+      // The stream failed before delivering any frame (404, proxy, network): fall back
+      // to the typed endpoint so the student still gets a corrected attempt.
+      await submitViaTypedEndpoint(payload);
     } finally {
-      setIsSubmitting(false);
+      abortRef.current = undefined;
     }
+  };
+
+  const cancel = () => {
+    abortRef.current?.abort();
   };
 
   return (
@@ -222,7 +282,7 @@ function ExerciseSolver({ artifact }: { readonly artifact: Extract<Artifact, { r
             question={question}
             value={answers[question.id] ?? ""}
             correction={attempt?.status === "graded" ? attempt.corrections.find((item) => item.questionId === question.id) : undefined}
-            disabled={attempt !== null}
+            disabled={run.phase === "done"}
             onChange={(value) => setAnswer(question.id, value)}
           />
         ))}
@@ -243,8 +303,9 @@ function ExerciseSolver({ artifact }: { readonly artifact: Extract<Artifact, { r
         className="sticky bottom-0 mt-6 border border-line bg-surface-raised backdrop-blur"
         style={{ borderRadius: 16, padding: 16 }}
       >
-        {attempt === null
-          ? (
+        {run.phase === "running" && <EvaluationProgress run={run} onCancel={cancel} />}
+
+        {run.phase !== "running" && run.phase !== "done" && (
               <div className="flex flex-wrap items-center justify-between gap-3">
                 <p className="text-ink-mute" style={{ fontSize: 13 }}>
                   {unansweredQuestions.length === 0
@@ -270,8 +331,8 @@ function ExerciseSolver({ artifact }: { readonly artifact: Extract<Artifact, { r
                   {isSubmitting ? "Submitting…" : `Submit ${artifact.kind}`}
                 </button>
               </div>
-            )
-          : (
+            )}
+        {run.phase === "done" && (
               <div className="flex flex-wrap items-center justify-between gap-3">
                 <p className="font-semibold text-good" style={{ fontSize: 14 }}>Attempt graded.</p>
                 <button
@@ -286,8 +347,7 @@ function ExerciseSolver({ artifact }: { readonly artifact: Extract<Artifact, { r
                   type="button"
                   onClick={() => {
                     setAnswers({});
-                    setAttempt(null);
-                    setError(undefined);
+                    setRun({ phase: "idle" });
                   }}
                 >
                   Try again
@@ -515,7 +575,7 @@ function CorrectionDetails({
         </>
       )}
       {correction.questionType === "short-answer" && (
-        <p className="text-ink-soft">{correction.feedback}</p>
+        <ShortAnswerDetails correction={correction} />
       )}
     </div>
   );
