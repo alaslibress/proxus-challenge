@@ -7,3 +7,9 @@ export const PdfCitation = Schema.Struct({
   verified: Schema.Boolean
 });
 export type PdfCitation = typeof PdfCitation.Type;
+
+export const ArtifactSource = Schema.Struct({
+  materialId: Schema.String,
+  pages: Schema.Array(Schema.Number)
+});
+export type ArtifactSource = typeof ArtifactSource.Type;

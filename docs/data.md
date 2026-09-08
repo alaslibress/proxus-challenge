@@ -30,15 +30,18 @@ El repo espera que Poppler esté instalado para inspeccionar/renderizar PDFs:
 
 - `pdfinfo`
 - `pdftoppm`
+- `pdftotext`
 
 El tutor puede usar:
 
 ```txt
 materials list
 materials view <materialId> <pages>
+materials text <materialId> <pages>
 ```
 
-`materials view` renderiza páginas como imágenes para Gemini multimodal.
+`materials view` renderiza páginas como imágenes para Gemini multimodal. `materials text`
+extrae el texto literal de la página, la fuente para citas verificables.
 
 ## Artifacts
 
