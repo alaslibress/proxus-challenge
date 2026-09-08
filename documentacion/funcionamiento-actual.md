@@ -135,25 +135,32 @@ compilación en el cuarto. **Los eventos nuevos deben ir en la unión de frames
 
 ---
 
-## 4. El pipeline de PDF: solo imágenes
+## 4. El pipeline de PDF: imágenes y texto por página
 
-`PdfService` tiene **dos métodos** (`domain/materials/pdf-service.ts:8-15`):
-`pageCount` y `renderPage`. La implementación Poppler
-(`infra/materials/poppler-pdf-service.ts`) exige `pdfinfo` y `pdftoppm` al arrancar y
-renderiza cada página con `pdftoppm -singlefile -f N -l N -r 144 -png`, devolviendo un
-data-URL base64.
+`PdfService` tiene **tres métodos** (`domain/materials/pdf-service.ts`): `pageCount`,
+`renderPage` y `extractPageText`. La implementación Poppler
+(`infra/materials/poppler-pdf-service.ts`) exige `pdfinfo`, `pdftoppm` y `pdftotext` al
+arrancar. Renderiza cada página con `pdftoppm -singlefile -f N -l N -r 144 -png`,
+devolviendo un data-URL base64, y extrae texto con
+`pdftotext -f N -l N -enc UTF-8 <path> -` (sin `-layout`, en orden de lectura).
 
 Ese PNG viaja al prompt como parte `file` gracias al único caso multimodal del harness
-(`session.ts:173-190`), que olfatea si un tool result es `MaterialPageImages`.
+(`session.ts:173-190`), que olfatea si un tool result es `MaterialPageImages`. El texto
+viaja como tool result normal (`MaterialPageTexts`), sin necesitar ese caso multimodal.
 
-**No existe extracción de texto.** Ni `pdftotext`, ni `pdf-parse`, ni `pdfjs`, ni OCR.
-Y por tanto tampoco hay chunking, embeddings, índice vectorial ni búsqueda: **no hay
-RAG**. La "recuperación" consiste en que el modelo adivine un rango de páginas y pida
-verlas como imagen.
+**Extracción de texto sin RAG.** `pdftotext` da texto literal por página, pero no hay
+chunking, embeddings, índice vectorial ni búsqueda: **sigue sin haber RAG**. La unidad de
+evidencia es la página completa, no un chunk. Si la página es un escaneo sin capa de
+texto, `pdftotext` devuelve vacío y el tutor debe caer a `materials view`.
+
+`domain/materials/citation.ts` añade un verificador puro (`verifyQuote`,
+`verifyCitations`) que comprueba si una cita del modelo aparece literalmente (tras
+normalizar acentos, guiones de corte y espacios) en el texto de una página, con un
+mínimo de 12 caracteres para evitar falsos positivos triviales.
 
 Los PDFs viven en `packages/server/.data/materials/pdfs/`, y el id y el título salen del
 nombre de fichero. `FileMaterialRepository` re-ejecuta `pdfinfo` por cada fichero en
-**cada** `list`/`get`/`renderPages`.
+**cada** `list`/`get`/`renderPages`/`extractText`.
 
 ---
 
@@ -316,8 +323,8 @@ Lo que la Tech Spec da por hecho y no existe:
 
 | La spec asume | La realidad |
 |---|---|
-| `citas_pdf` con extractos literales | No hay extracción de texto de PDF. Solo páginas rasterizadas. |
-| "Contexto RAG del PDF", "chunks" | No hay RAG: ni chunking, ni embeddings, ni índice, ni búsqueda. |
+| `citas_pdf` con extractos literales | Ya hay extracción de texto por página (`pdftotext`) y un verificador puro (`domain/materials/citation.ts`) que comprueba las citas contra ese texto. Falta conectarlo al motor/Juez: eso es PR-04. |
+| "Contexto RAG del PDF", "chunks" | Sigue sin haber RAG: ni chunking, ni embeddings, ni índice, ni búsqueda. La unidad de evidencia es la página completa. |
 | Refactorizar `TutorChatService` para el trío | En el chat no hay "correcciones" que citar. Las correcciones están en `artifact.ts`. |
 | Zod / `@effect/schema` | Ni Zod ni `@effect/schema`: `Schema` del barrel `effect` v4 beta. |
 | `packages/client/` | No existe. Es `packages/web/`. |
