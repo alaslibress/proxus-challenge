@@ -1,10 +1,12 @@
 import type { PageText } from "../materials/material.ts";
 
 export interface EvaluationInput {
+  readonly questionId: string;
   readonly questionPrompt: string;
   readonly expectedAnswer: string;
   readonly studentAnswer: string;
   readonly materialId: string;
+  readonly pages: readonly number[];
   readonly evidence: readonly PageText[];
 }
 

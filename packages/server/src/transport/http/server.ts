@@ -9,10 +9,12 @@ import { GeminiModel } from "../../domain/agents/gemini.ts";
 import { TutorChatService, TutorChatServiceLive } from "../../domain/agents/academic-tutor/tutor-chat-service.ts";
 import { EvaluationEngineService, EvaluationEngineServiceLive } from "../../domain/evaluation/engine.ts";
 import { reviewGradedAttemptStreaming } from "../../domain/evaluation/review.ts";
+import { EvaluationTrace } from "../../domain/evaluation/trace.ts";
 import { ArtifactRepository } from "../../domain/artifacts/artifact.ts";
 import { MaterialRepository } from "../../domain/materials/material.ts";
 import { FileArtifactRepository } from "../../infra/artifacts/file-artifact-repository.ts";
 import { FileMaterialRepository } from "../../infra/materials/file-material-repository.ts";
+import { FileEvaluationTrace } from "../../infra/evaluation/file-evaluation-trace.ts";
 import { PopplerPdfService } from "../../infra/materials/poppler-pdf-service.ts";
 import { HttpHandlersLive } from "./handlers.ts";
 
@@ -77,6 +79,7 @@ const AttemptStreamRoute = HttpRouter.add("POST", "/api/artifacts/:id/submit/str
     const languageModel = yield* LanguageModel.LanguageModel;
     const evaluationEngine = yield* EvaluationEngineService;
     const materialRepository = yield* MaterialRepository;
+    const evaluationTrace = yield* EvaluationTrace;
 
     const submitted = yield* artifacts.submitAttempt({ ...payload, artifactId }).pipe(Effect.orDie);
     const graded = yield* artifacts.gradeAttempt(submitted.id).pipe(Effect.orDie);
@@ -91,6 +94,7 @@ const AttemptStreamRoute = HttpRouter.add("POST", "/api/artifacts/:id/submit/str
       Stream.provideService(LanguageModel.LanguageModel, languageModel),
       Stream.provideService(EvaluationEngineService, evaluationEngine),
       Stream.provideService(MaterialRepository, materialRepository),
+      Stream.provideService(EvaluationTrace, evaluationTrace),
       Stream.map(encodeAttemptNdjson)
     );
 
@@ -116,7 +120,8 @@ const InfraLive = Layer.mergeAll(
   FileMaterialRepository.layer(".data/materials/pdfs").pipe(
     Layer.provide(PopplerPdfService.layer)
   ),
-  FileArtifactRepository.layer(".data/artifacts")
+  FileArtifactRepository.layer(".data/artifacts"),
+  FileEvaluationTrace.layer(".data/sessions")
 );
 
 export const HttpServerLive = HttpRouter.serve(Routes).pipe(

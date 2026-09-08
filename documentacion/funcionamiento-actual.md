@@ -200,6 +200,19 @@ desviación consciente del ADR-01 documentada en `planes/pr-04-evaluation-engine
 panel se traga y el attempt determinista queda intacto. Multiple-choice y true-false no
 pasan por el panel: siguen siendo 100% deterministas y sin latencia añadida.
 
+**Desde PR-06, cada corrección de una short-answer deja traza en disco.** El motor
+(`engine.ts`) devuelve, junto al veredicto, un borrador de `EvaluationTraceEntry`
+(`domain/evaluation/trace.ts`) con el texto de cada profe o su motivo de fallo y el JSON
+crudo del Juez; `review.ts` lo completa con la nota determinista, la nota final y si el
+panel la modificó, y llama a `EvaluationTrace.record`. La implementación
+(`infra/evaluation/file-evaluation-trace.ts`) formatea la entrada en Markdown legible
+(`domain/evaluation/trace-format.ts`, función pura sin Effect) y la escribe en
+`.data/sessions/<attemptId>.md` — un fichero por intento, una sección por pregunta.
+`record` no tiene canal de error y escribe en un fiber desligado (`Effect.forkDetach`,
+el único fork que existe en Effect v4 para esto: `forkChild`/`forkScoped` atarían la
+escritura al scope de la petición HTTP), así que un directorio sin permisos o un fallo de
+formateo nunca afecta a la corrección del alumno ni le añade latencia perceptible.
+
 Se persiste en `.data/artifacts/attempts/<id>.json` desde
 `infra/artifacts/file-artifact-repository.ts:149-155`.
 

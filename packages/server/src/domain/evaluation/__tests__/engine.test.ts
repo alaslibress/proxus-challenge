@@ -51,10 +51,12 @@ const makeFakeLanguageModel = (options: {
   });
 
 const baseInput: EvaluationInput = {
+  questionId: "q1",
   questionPrompt: "¿Qué es la fotosíntesis?",
   expectedAnswer: "El proceso por el cual las plantas convierten luz en energía.",
   studentAnswer: "Las plantas usan la luz para producir energía.",
   materialId: "mat-1",
+  pages: [1],
   evidence: [{ page: 1, text: "La fotosíntesis es el proceso por el cual las plantas convierten luz solar en energía química." }]
 };
 
@@ -78,12 +80,12 @@ describe("EvaluationEngineService.evaluate", () => {
 
     const result = await Effect.runPromise(runEvaluate(baseInput, model));
 
-    expect(result.is_correct).toBe(true);
-    expect(result.feedback).toBe("Consolidado.");
-    expect(result.citas_pdf).toHaveLength(1);
-    expect(result.citas_pdf[0]?.verified).toBe(true);
-    expect(result.citas_pdf[0]?.page).toBe(1);
-    expect(result.citas_pdf[0]?.materialId).toBe("mat-1");
+    expect(result.feedback.is_correct).toBe(true);
+    expect(result.feedback.feedback).toBe("Consolidado.");
+    expect(result.feedback.citas_pdf).toHaveLength(1);
+    expect(result.feedback.citas_pdf[0]?.verified).toBe(true);
+    expect(result.feedback.citas_pdf[0]?.page).toBe(1);
+    expect(result.feedback.citas_pdf[0]?.materialId).toBe("mat-1");
   });
 
   it("marks an invented/unverifiable citation as not verified", async () => {
@@ -97,8 +99,8 @@ describe("EvaluationEngineService.evaluate", () => {
 
     const result = await Effect.runPromise(runEvaluate(baseInput, model));
 
-    expect(result.citas_pdf[0]?.verified).toBe(false);
-    expect(result.citas_pdf[0]?.page).toBe(0);
+    expect(result.feedback.citas_pdf[0]?.verified).toBe(false);
+    expect(result.feedback.citas_pdf[0]?.page).toBe(0);
   });
 
   it("continues to the judge when only one profe fails (mode: result tolerates partial panel failure)", async () => {
@@ -114,8 +116,8 @@ describe("EvaluationEngineService.evaluate", () => {
     // Both teachers were attempted (good failed, bad succeeded) and the judge still ran.
     expect(seenSystemPrompts.some((prompt) => prompt.includes("Profe Bueno"))).toBe(true);
     expect(seenSystemPrompts.some((prompt) => prompt.includes("Profe Malo"))).toBe(true);
-    expect(result.is_correct).toBe(false);
-    expect(result.feedback).toBe("Falta precisión.");
+    expect(result.feedback.is_correct).toBe(false);
+    expect(result.feedback.feedback).toBe("Falta precisión.");
   });
 
   it("continues to the judge when both profes fail — the judge is told neither critique is available", async () => {
@@ -127,8 +129,8 @@ describe("EvaluationEngineService.evaluate", () => {
 
     const result = await Effect.runPromise(runEvaluate(baseInput, model));
 
-    expect(result.is_correct).toBe(false);
-    expect(result.feedback).toBe("Sin apoyo de los profes.");
+    expect(result.feedback.is_correct).toBe(false);
+    expect(result.feedback.feedback).toBe("Sin apoyo de los profes.");
   });
 
   it("fails with EvaluationUnavailable when the judge itself fails", async () => {
@@ -147,6 +149,6 @@ describe("EvaluationEngineService.evaluate", () => {
 
     const result = await Effect.runPromise(runEvaluate(baseInput, model));
 
-    expect(result.citas_pdf).toEqual([]);
+    expect(result.feedback.citas_pdf).toEqual([]);
   });
 });
