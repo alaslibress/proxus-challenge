@@ -48,7 +48,11 @@ const renderSerializationError = (reason: unknown) => {
     ? "\n\nFor multiple-choice questions, options must be objects, not strings: [{\"id\":\"a\",\"text\":\"Option A\"}]. The correctOptionId must match one option id."
     : "";
 
-  return `Invalid artifact/attempt JSON: ${message}${multipleChoiceHint}\n\nUse artifacts create --help or artifacts submit --help for examples.`;
+  const questionShapeHint = message.includes("questions")
+    ? "\n\nRequired question fields: multiple-choice -> type,id,prompt,options,correctOptionId,explanation; true-false -> type,id,prompt,correctAnswer,explanation; short-answer (tests only) -> type,id,prompt,expectedAnswer (maxScore is optional, defaults to 1). sourcePage is always optional."
+    : "";
+
+  return `Invalid artifact/attempt JSON: ${message}${multipleChoiceHint}${questionShapeHint}\n\nUse artifacts create --help or artifacts submit --help for examples.`;
 };
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
@@ -154,10 +158,18 @@ export const makeArtifactCommands = (repository: ArtifactRepository) => {
     },
     {
       command: `artifacts create '{"kind":"quiz","title":"Basics quiz","questions":[{"type":"true-false","id":"q1","prompt":"2+2=4","correctAnswer":true,"explanation":"Basic arithmetic."}]}'`,
-      description: "Create a quiz artifact"
+      description: "Create a quiz artifact (true-false requires correctAnswer and explanation)"
+    },
+    {
+      command: `artifacts create '{"kind":"quiz","title":"Concept quiz","questions":[{"type":"multiple-choice","id":"q1","prompt":"Which one is qualitative?","options":[{"id":"a","text":"Colour"},{"id":"b","text":"Height"}],"correctOptionId":"a","explanation":"Colour describes a quality."}]}'`,
+      description: "Multiple-choice requires options, correctOptionId and explanation"
+    },
+    {
+      command: `artifacts create '{"kind":"test","title":"Limits test","questions":[{"type":"short-answer","id":"q1","prompt":"Define a limit.","expectedAnswer":"The value a function approaches."}]}'`,
+      description: "Short-answer (tests only) requires expectedAnswer, not correctAnswer; maxScore is optional and defaults to 1"
     }
   ])(
-    AgentCli.Command.withDescription("Create a note, quiz, or test artifact from JSON")(
+    AgentCli.Command.withDescription("Create a note, quiz, or test artifact from JSON. multiple-choice: type,id,prompt,options,correctOptionId,explanation. true-false: type,id,prompt,correctAnswer,explanation. short-answer (test only): type,id,prompt,expectedAnswer (+optional maxScore). sourcePage is optional on any question.")(
       AgentCli.Command.exec("create", {
         json: AgentCli.Argument.string("json").pipe(
           AgentCli.Argument.withDescription("CreateArtifactInput JSON")
@@ -176,6 +188,10 @@ export const makeArtifactCommands = (repository: ArtifactRepository) => {
     {
       command: `artifacts submit '{"artifactKind":"quiz","artifactId":"abc123","answers":[{"questionType":"true-false","questionId":"q1","answer":true}]}'`,
       description: "Submit answers for a quiz or test"
+    },
+    {
+      command: `artifacts submit '{"artifactKind":"test","artifactId":"abc123","answers":[{"questionType":"multiple-choice","questionId":"q1","selectedOptionId":"a"},{"questionType":"short-answer","questionId":"q2","answer":"Free text"}]}'`,
+      description: "multiple-choice answers use selectedOptionId; short-answer answers use answer"
     }
   ])(
     AgentCli.Command.withDescription("Submit an ungraded attempt for a quiz or test")(

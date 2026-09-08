@@ -194,8 +194,14 @@ const geminiTools = (tools: LanguageModel.ProviderOptions["tools"]) =>
   tools.length === 0 ? [] : [{ functionDeclarations: toolDeclarations(tools) }];
 
 const toolChoiceConfig = (options: LanguageModel.ProviderOptions) => {
-  if (options.toolChoice === "none" || options.tools.length === 0) {
+  if (options.tools.length === 0) {
     return undefined;
+  }
+
+  // Omitting toolConfig leaves Gemini in AUTO, so "none" has to be stated explicitly:
+  // the wrap-up turn in session.ts relies on it to guarantee a text answer.
+  if (options.toolChoice === "none") {
+    return { mode: "NONE" };
   }
 
   if (options.toolChoice === "required") {

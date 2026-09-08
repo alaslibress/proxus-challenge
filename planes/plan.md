@@ -99,7 +99,7 @@ Documentos de origen, en `documentacion/`:
 
 | PR | Plan | Alcance | Estado | Depende de |
 |----|------|---------|--------|-----------|
-| PR-01 | [`pr-01-ssot-schemas/plan.md`](./pr-01-ssot-schemas/plan.md) | Consolidar los 34 schemas de artifact en `packages/shared` y vaciar la copia del server. Refactor sin cambio de comportamiento. | mergeado | — |
+| PR-01 | [`pr-01-ssot-schemas/plan.md`](./pr-01-ssot-schemas/plan.md) | Consolidar en `packages/shared` todos los schemas de artifact —29 duplicados, 5 que suben del server y 2 que ya sólo estaban en shared, 35 declaraciones en total tras el PR— y vaciar la copia del server. Refactor sin cambio de comportamiento. | mergeado | — |
 | PR-1.5 | [`pr-1.5-sistema-visual/plan.md`](./pr-1.5-sistema-visual/plan.md) | Sistema visual del canvas de Claude Design: capa de tokens `@theme`, fuentes Geist, tema claro y repintado de los cuatro componentes. Deja `documentacion/design-system.md` como norma para todo PR posterior. | mergeado | PR-01 |
 | PR-12 | [`pr-12-fuga-tool-calls/plan.md`](./pr-12-fuga-tool-calls/plan.md) | Bug: el modelo escribe la tool call como texto y se renderiza al alumno. Observabilidad (`finishReason`, log por paso), detección y recuperación en el adaptador, timeouts de tools y partes nativas `functionCall`/`functionResponse`. | mergeado | PR-01 |
 | PR-12.2 | [`pr-12-2-tool-calls-estructural/plan.md`](./pr-12-2-tool-calls-estructural/plan.md) | Quita la causa: `renderMessage` emite `Prompt.ToolCallPart`/`ToolResultPart` en vez de prosa, `gemini.ts` los traduce a `functionCall`/`functionResponse` y se borran las tres regex. Más `mode: "ANY"` en el reintento, degradación en vez de rendición y log del request. Local a `packages/server`. | mergeado | PR-12.1 |

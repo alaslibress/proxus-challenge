@@ -41,6 +41,7 @@ Materiales:
 ```txt
 materials list
 materials view <materialId> <pages>
+materials text <materialId> <pages>
 ```
 
 Artifacts:
@@ -54,7 +55,51 @@ artifacts attempts [artifactId]
 artifacts grade <attemptId>
 ```
 
-`materials view` puede devolver imágenes de páginas para llamadas multimodales a Gemini.
+`materials view` puede devolver imágenes de páginas para llamadas multimodales a Gemini;
+`materials text` devuelve el texto literal por página, con una cabecera
+`--- <materialId> page N ---` por página (`material-commands.ts:89-90`). Esa cabecera es
+fontanería interna: **nunca** debe llegar al alumno.
+
+### Contrato de `artifacts create`
+
+El modelo no puede adivinar el schema, así que está escrito en los tres sitios donde mira:
+la skill `create-study-artifacts`, el `--help` del comando y el mensaje de error de
+validación (`artifact-commands.ts`, `renderSerializationError`). Los tres dicen lo mismo, y
+`packages/server/src/domain/artifacts/__tests__/artifact-schema.test.ts` lo ata al schema
+real de `@proxus/shared`:
+
+| Tipo de pregunta | Dónde vale | Campos requeridos | Opcionales |
+|---|---|---|---|
+| `multiple-choice` | `quiz` y `test` | `type`, `id`, `prompt`, `options` (objetos `{id,text}`), `correctOptionId`, `explanation` | `sourcePage` |
+| `true-false` | `quiz` y `test` | `type`, `id`, `prompt`, `correctAnswer` (booleano), `explanation` | `sourcePage` |
+| `short-answer` | **sólo `test`** | `type`, `id`, `prompt`, `expectedAnswer` (string, **no** `correctAnswer`) | `maxScore` (por defecto **1**), `sourcePage` |
+
+Tres reglas que se saltaba el modelo antes de documentarlas:
+
+- `explanation` es obligatoria en las preguntas cerradas porque **es** el feedback que se le
+  enseña al alumno tras corregir. Una cadena vacía cumple el schema y rompe el producto.
+- No existe la pregunta de respuesta múltiple: `correctOptionId` es uno. La skill obliga al
+  tutor a elegir un rodeo (`short-answer` con la lista, o varias preguntas) y a decirlo.
+- El `id` del artefacto lo asigna el servidor; enviarlo es un error.
+
+## Presupuesto de pasos y turno de cierre
+
+El bucle del harness (`harness/session.ts`) da `maxSteps` pasos por turno; por defecto
+**8**, y 8 es lo que fijan las dos puertas de entrada del tutor
+(`tutor-chat-service.ts`, `academic-tutor.ts`). Un flujo con materiales no cabe en menos:
+dos `load_skill`, uno o dos `materials text` y un `artifacts create` antes de escribir la
+primera línea de respuesta.
+
+Cuando el presupuesto se agota, el harness **no** devuelve el último tool result —eso era el
+bug: el volcado de una página del PDF salía firmado por el tutor—. Gasta un turno más con
+las herramientas apagadas (`toolChoice: "none"`) para forzar una respuesta redactada con lo
+ya reunido, lo anota con el log `agent.wrap_up`, y si ese turno también falla devuelve un
+mensaje explícito de que se quedó sin pasos. Cubierto por
+`packages/server/src/domain/agents/harness/__tests__/session-step-budget.test.ts`.
+
+Para que apagar las herramientas signifique algo, el adaptador tiene que decirlo: omitir
+`toolConfig` deja a Gemini en `AUTO`, así que `toolChoice: "none"` manda `{ mode: "NONE" }`
+explícito (`gemini.ts`, `toolChoiceConfig`).
 
 ## Flujo de chat
 
@@ -155,7 +200,14 @@ Script de verificación manual contra la API real:
 pnpm --filter @proxus/server run panel:check "<respuesta alumno>" "<respuesta esperada>" <materialId> <página>
 ```
 
-Imprime las dos críticas, el JSON del Juez y las citas con su `verified`.
+Imprime las dos críticas, el JSON del Juez y las citas con su `verified`, y deja la traza
+en `packages/server/.data/sessions/panel-check-<timestamp>.md`. Ejecutado en vivo el
+8-sep-2026 en las dos direcciones (nota que no sube sin cita sostenida, nota que sube con
+cita `verified: true`); resultados y coste en cuota en `docs/testing.md`.
+
+Ojo con el coste: el script repite las llamadas a los dos profes fuera del motor sólo para
+poder imprimirlas (`domain/evaluation/panel.check.ts:46-64`), así que cada pasada gasta 5
+llamadas y no 3, sobre un límite de *free tier* de 20 al día.
 
 ## Trazabilidad del panel — PR-06
 
