@@ -1,5 +1,6 @@
 import { Schema } from "effect";
 import { ArtifactSource } from "./citation.ts";
+import { EnrichedFeedbackSchema } from "./evaluation.ts";
 
 export const QuestionOption = Schema.Struct({
   id: Schema.String,
@@ -192,7 +193,8 @@ export const ShortAnswerCorrection = Schema.Struct({
   questionId: Schema.String,
   score: Schema.Number,
   maxScore: Schema.Number,
-  feedback: Schema.String
+  feedback: Schema.String,
+  review: Schema.optional(EnrichedFeedbackSchema)
 });
 export type ShortAnswerCorrection = typeof ShortAnswerCorrection.Type;
 
