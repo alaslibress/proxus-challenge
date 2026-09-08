@@ -5,6 +5,7 @@ import {
   Model as AiModel,
   Response
 } from "effect/unstable/ai";
+import { resolveAllRefs, toGeminiResponseSchema } from "./gemini-schema.ts";
 
 const defaultModel = "gemini-3.6-flash";
 
@@ -231,11 +232,24 @@ const toolConfig = (options: LanguageModel.ProviderOptions) => {
     : { functionCallingConfig };
 };
 
+const generationConfig = (options: LanguageModel.ProviderOptions) =>
+  options.responseFormat.type === "json"
+    ? {
+        responseMimeType: "application/json",
+        responseSchema: toGeminiResponseSchema(
+          resolveAllRefs(
+            Schema.toJsonSchemaDocument(options.responseFormat.schema, { additionalProperties: false })
+          )
+        )
+      }
+    : undefined;
+
 const requestBody = (options: LanguageModel.ProviderOptions) => ({
   systemInstruction: promptSystemInstruction(options.prompt),
   contents: promptContents(options.prompt),
   tools: geminiTools(options.tools),
-  toolConfig: toolConfig(options)
+  toolConfig: toolConfig(options),
+  generationConfig: generationConfig(options)
 });
 
 export const encodeToolCallId = (baseId: string, thoughtSignature: string | undefined): string =>

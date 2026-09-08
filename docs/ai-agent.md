@@ -67,6 +67,37 @@ artifacts grade <attemptId>
    - `{ type: "done" }`
 6. Si hubo tool results, la web invalida materiales/artifacts.
 
+## Salida estructurada (JSON) — PR-03
+
+El adaptador de Gemini (`packages/server/src/domain/agents/gemini.ts`) honra
+`options.responseFormat` cuando se llama a `LanguageModel.generateObject({ schema, ... })`
+en lugar de `generateText`. En ese caso:
+
+- `requestBody` añade `generationConfig: { responseMimeType: "application/json", responseSchema }`.
+- `responseSchema` se deriva de la `Schema` de Effect con `Schema.toJsonSchemaDocument`, se
+  resuelven sus `$ref` con `resolveAllRefs` y se sanea al subconjunto tipo OpenAPI que
+  acepta Gemini con `toGeminiResponseSchema` (`packages/server/src/domain/agents/gemini-schema.ts`,
+  ambas funciones puras y sin dependencia de Effect ni de API key).
+- En modo texto (`responseFormat.type === "text"`), `generationConfig` es `undefined` y el
+  cuerpo de la petición no cambia respecto al comportamiento anterior.
+- `LanguageModel.generateObject` decodifica la respuesta con el `defaultCodecTransformer`
+  de Effect; si el modelo no respeta el schema, el fallo es un `AiError.InvalidOutputError`
+  tipado, no una excepción ni un `JSON.parse` manual.
+
+El contrato de evaluación (`FinalFeedbackSchema`, `EnrichedFeedbackSchema`) vive en
+`packages/shared/src/schemas/evaluation.ts`.
+
+Script de verificación manual contra la API real:
+
+```bash
+pnpm --filter @proxus/server run structured-output:check
+```
+
+Llama a `LanguageModel.generateObject` con `FinalFeedbackSchema` y un prompt de ejemplo, y
+escribe el objeto decodificado por consola. **El subconjunto de `responseSchema` que
+acepta Gemini no está garantizado por ningún tipo**: hay que ejecutar este script contra la
+API real antes de confiar en un schema nuevo.
+
 ## Configuración
 
 ```env

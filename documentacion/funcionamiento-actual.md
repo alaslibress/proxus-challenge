@@ -236,10 +236,13 @@ Tres límites que condicionan cualquier diseño:
 
 1. **`streamText: () => Stream.empty`** (`:285`). El streaming a nivel de proveedor no
    existe. Lo que llega a la UI son mensajes completos del bucle del agente.
-2. **El cuerpo de la petición no incluye `generationConfig`** (`:205-210`): hoy es
-   imposible pedir `responseMimeType: "application/json"` o `responseSchema`. **No hay
-   salida estructurada.** (Irónicamente, la copia vendorizada sin usar de
-   `packages/ai-google` sí los declara.)
+2. **Salida estructurada (PR-03).** El adaptador ahora honra `options.responseFormat`: si
+   es `{ type: "json", schema, ... }`, `requestBody` añade
+   `generationConfig: { responseMimeType: "application/json", responseSchema }`, con
+   `responseSchema` derivado de `Schema.toJsonSchemaDocument` y saneado para el subconjunto
+   OpenAPI que acepta Gemini (`resolveAllRefs` + `toGeminiResponseSchema` en
+   `gemini-schema.ts`). En modo texto (`responseFormat.type === "text"`) el helper devuelve
+   `undefined` y el cuerpo de la petición es idéntico al de antes del PR.
 3. Solo se honra la **primera** function call de la respuesta, y si viene una function
    call se **descartan las partes de texto** que la acompañen (`:212-258`). Si el modelo
    inventa un nombre de función, se reinterpreta como `load_skill` con ese nombre.
@@ -326,7 +329,6 @@ Lo que la Tech Spec da por hecho y no existe:
 | Zod / `@effect/schema` | Ni Zod ni `@effect/schema`: `Schema` del barrel `effect` v4 beta. |
 | `packages/client/` | No existe. Es `packages/web/`. |
 | "Actualizar los Effect Atom" del chat | El estado del chat no está en atoms, está en `useState`. |
-| JSON estructurado del LLM | `gemini.ts` no envía `generationConfig`; `responseSchema` es inalcanzable. |
 | Streaming de razonamiento | `streamText` es `Stream.empty`. Solo hay eventos de mensaje completo. |
 
 Y dos cosas más que hay que saber antes de probar nada:
