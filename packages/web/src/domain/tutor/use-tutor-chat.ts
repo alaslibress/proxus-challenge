@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { artifactsQuery } from "../artifacts/atoms.ts";
 import { materialsQuery } from "../materials/atoms.ts";
 import { applyInvalidations, invalidationsForToolCall } from "./invalidation.ts";
-import { isAbortError, streamTutorMessage } from "./stream.ts";
+import { resolveStreamFailure, streamTutorMessage } from "./stream.ts";
 
 export type TutorChatStatus = "idle" | "sending";
 
@@ -14,6 +14,8 @@ export interface TutorChatState {
   readonly status: TutorChatStatus;
   readonly error: string | undefined;
   readonly canRetry: boolean;
+  // True when the last turn ended because the user pressed Stop. Cleared on the next send.
+  readonly stopped: boolean;
   readonly setInput: (value: string) => void;
   readonly submit: (value: string) => void;
   readonly stop: () => void;
@@ -26,6 +28,7 @@ export const useTutorChat = (): TutorChatState => {
   const [input, setInput] = useState("");
   const [status, setStatus] = useState<TutorChatStatus>("idle");
   const [error, setError] = useState<string | undefined>();
+  const [stopped, setStopped] = useState(false);
 
   const refreshArtifacts = useAtomRefresh(artifactsQuery);
   const refreshMaterials = useAtomRefresh(materialsQuery);
@@ -45,6 +48,7 @@ export const useTutorChat = (): TutorChatState => {
 
     setStatus("sending");
     setError(undefined);
+    setStopped(false);
     setInput("");
     pendingInvalidations.current = [];
 
@@ -72,9 +76,19 @@ export const useTutorChat = (): TutorChatState => {
 
       lastAttempt.current = undefined;
     } catch (cause) {
-      setMessages(history);
-      setInput(prompt);
-      if (!isAbortError(cause)) {
+      const outcome = resolveStreamFailure(cause);
+      if (outcome.keepMessages) {
+        // Stop is a clean halt, not an undo: what already arrived stays on screen and
+        // there is nothing to retry.
+        setStopped(true);
+        lastAttempt.current = undefined;
+      } else {
+        setMessages(history);
+      }
+      if (outcome.restoreInput) {
+        setInput(prompt);
+      }
+      if (outcome.showError) {
         setError(cause instanceof Error ? cause.message : "Something went wrong. Try again.");
       }
     } finally {
@@ -100,6 +114,7 @@ export const useTutorChat = (): TutorChatState => {
   const clear = () => {
     setMessages([]);
     setError(undefined);
+    setStopped(false);
     lastAttempt.current = undefined;
   };
 
@@ -109,6 +124,7 @@ export const useTutorChat = (): TutorChatState => {
     status,
     error,
     canRetry: lastAttempt.current !== undefined,
+    stopped,
     setInput,
     submit,
     stop,

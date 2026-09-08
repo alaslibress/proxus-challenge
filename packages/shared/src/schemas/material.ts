@@ -32,3 +32,10 @@ export const MaterialNotFoundError = Schema.TaggedStruct("MaterialNotFound", {
   materialId: Schema.String
 });
 export type MaterialNotFoundError = typeof MaterialNotFoundError.Type;
+
+// `message` is the field name the upload client already reads on a 400 response
+// (packages/web/src/api-client/upload.ts).
+export const InvalidPdfError = Schema.TaggedStruct("InvalidPdf", {
+  message: Schema.String
+});
+export type InvalidPdfError = typeof InvalidPdfError.Type;

@@ -43,10 +43,13 @@ export const uploadMaterial = (file: File, options: UploadOptions): Promise<PdfM
         }
         return;
       }
-      console.error("Upload failed:", xhr.responseText);
-      reject(new Error("Could not upload the PDF. Check that the server is running."));
+      // The status is part of the message on purpose: a silent "is the server running?"
+      // hid a missing endpoint (404) behind what looked like a connectivity problem.
+      console.error("Upload failed:", xhr.status, xhr.responseText);
+      reject(new Error(`Could not upload the PDF (HTTP ${xhr.status}).`));
     };
 
+    // No response at all — this is the case where the server really may be down.
     xhr.onerror = () => {
       reject(new Error("Could not upload the PDF. Check that the server is running."));
     };

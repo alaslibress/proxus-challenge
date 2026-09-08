@@ -2,7 +2,7 @@ import { RegistryProvider } from "@effect/atom-react";
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { App } from "./App.tsx";
-import "./styles.generated.css";
+import "./styles.input.css";
 
 const root = document.getElementById("root");
 
