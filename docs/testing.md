@@ -6,6 +6,7 @@ Desde la raíz:
 
 ```bash
 pnpm run typecheck
+pnpm run test
 pnpm --filter @proxus/web run build
 ```
 
@@ -15,9 +16,33 @@ Para backend solamente:
 pnpm --filter @proxus/server run typecheck
 ```
 
+## Tests automáticos (sin API key, sin red)
+
+`pnpm run test` desde la raíz es un alias de `pnpm -r test` y lanza las dos suites de
+vitest (server y web). **No necesita `.env`, ni API key, ni conexión**: el `LanguageModel`
+y el `MaterialRepository` son falsos.
+
+```bash
+pnpm run test                              # las dos suites
+pnpm --filter @proxus/server run test      # sólo backend
+pnpm --filter @proxus/web run test         # sólo frontend
+pnpm --filter @proxus/server run test:watch
+```
+
+Resultado actual: **15 ficheros, 137 tests, todos en verde** (server 12/117, web 3/20).
+
+Cubren el motor de evaluación y su degradación cuando un profe o el Juez caen, la
+verificación literal de citas, el formato de la traza Markdown, el purgado de schemas para
+Gemini, el lector NDJSON del navegador y el stream de evaluación.
+
+Lo que **no** cubren: la calidad de los prompts. Ante una respuesta X del Juez garantizan
+que el sistema hace Y; para saber si el Juez acierta hay que ejecutar la eval con LLM real
+de la sección siguiente.
+
 ## Evals / smoke tests AI
 
-Requieren `.env` con `GOOGLE_GENERATIVE_AI_API_KEY`.
+Sólo **estas** requieren `.env` con `GOOGLE_GENERATIVE_AI_API_KEY` (y gastan cuota). Los
+tests automáticos de arriba no.
 
 ```bash
 pnpm --filter @proxus/server run eval:tutor:artifact-authoring
