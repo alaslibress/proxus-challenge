@@ -79,8 +79,12 @@ evaluación es orientativa.
 
 ### Requisitos
 
-- Node.js 20+, `pnpm`.
+- **Node.js ≥ 22.18** (vitest 5 exige `^22.12 || ^24 || >=26`, y los scripts CLI usan
+  `import.meta.main`, disponible desde 22.18). Verificado sobre Node 22.22.2.
+- `pnpm` 10 (el repo pinea `pnpm@10.23.0` en `packageManager`).
 - Poppler: `pdfinfo`, `pdftoppm` **y `pdftotext`**, los tres en el `PATH`.
+  Debian/Ubuntu `apt install poppler-utils` · Fedora `dnf install poppler-utils` ·
+  macOS `brew install poppler`.
 - Una API key de Google Gemini (sólo para el flujo con LLM; los tests no la necesitan).
 
 ### Pasos
@@ -89,6 +93,11 @@ evaluación es orientativa.
 pnpm install
 cp .env.example .env          # y rellena GOOGLE_GENERATIVE_AI_API_KEY
 ```
+
+`.env.example` trae `GEMINI_MODEL=gemini-3.6-flash`. Ojo con esa variable: apuntar a un
+modelo retirado (`gemini-2.5-flash` ya devuelve **404 "no longer available to new users"**)
+degrada todo el panel a la nota determinista sin que nada más se rompa — es el mismo
+comportamiento que la tabla de degradaciones de más abajo.
 
 **Coloca un PDF con capa de texto** (apuntes exportados, no un escaneo) donde el server los
 busca. Ese directorio **no existe en un checkout limpio** y sin él nada de la parte de
@@ -144,7 +153,7 @@ Todos sobre este árbol, con sus resultados reales:
 ```bash
 pnpm run typecheck        # ✅ los cuatro paquetes, sin errores
 pnpm run test             # ✅ 15 ficheros, 137 tests (server 12/117, web 3/20)
-pnpm --filter @proxus/web run build   # ✅ built in 599ms (aviso de chunk >500 kB, preexistente)
+pnpm --filter @proxus/web run build   # ✅ ~0,6 s (aviso de chunk >500 kB, preexistente)
 ```
 
 **`pnpm run test` no necesita `.env`, ni API key, ni red.** El `LanguageModel` y el
@@ -165,9 +174,17 @@ Además, la suite se ha comprobado **rompiéndola a propósito**: invalidando la
 rojo. Una suite que no puede ponerse roja no vale nada.
 
 **Lo que NO pude verificar de forma automática**: nada que dependa de Gemini de verdad. La
-eval con LLM real (`pnpm --filter @proxus/server run eval:tutor:artifact-authoring`) y el
-`panel:check` requieren API key y gastan cuota; se han ejecutado a mano durante el
-desarrollo, no forman parte de ningún check reproducible sin credenciales.
+eval con LLM real (`eval:tutor:artifact-authoring`), `panel:check` y
+`structured-output:check` requieren API key y gastan cuota, así que no forman parte de
+ningún check reproducible sin credenciales.
+
+Con una key del *free tier* de Gemini, esos tres scripts chocan contra el límite diario
+(`429 RESOURCE_EXHAUSTED`, *"Quota exceeded … limit: 20"*): **el veredicto de calidad de
+los prompts sigue sin medirse en este árbol**. Lo que sí quedó comprobado en vivo es la
+degradación: con los dos profes caídos por 429, el motor devolvió `EvaluationUnavailable`,
+la traza recogió el motivo de cada fallo y la nota se quedó en la determinista —
+exactamente lo que los tests con modelo falso predicen. El guion para repetirlo, cuando
+haya cuota, está en [`docs/testing.md`](./docs/testing.md).
 
 ## 5. Qué haría después
 

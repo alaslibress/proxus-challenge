@@ -388,6 +388,15 @@ todos obligatorios: que se cree el artifact esperado con el número de preguntas
 que la respuesta lo mencione (regex bilingüe y deliberadamente laxa) y que no haya tool
 results fallidos.
 
+En el mismo nivel 2, y también con API key, hay dos scripts sueltos:
+`domain/evaluation/panel.check.ts` (`pnpm --filter @proxus/server run panel:check
+<respuestaAlumno> <respuestaEsperada> <materialId> <página>`), que corre el panel entero
+sobre un PDF real e imprime las dos críticas y el JSON del Juez —es lo **único** que mide
+si los prompts son buenos—, y `domain/agents/structured-output.check.ts`
+(`structured-output:check`), que comprueba `generateObject` contra Gemini. Ninguno de los
+dos está automatizado; con una key de *free tier* chocan contra el límite diario
+(`429 RESOURCE_EXHAUSTED`, limit 20). Anotado en `docs/testing.md`.
+
 Los tres casos del dataset **no usan materiales**. Su repositorio falso **sí** tiene canal
 de texto: `extractText` lee `MaterialPageFixture.text` (`:289-303`). El disfraz PNG afecta
 **sólo a `renderPages`** (`:268-283`), que codifica ese mismo texto en base64 y lo hace

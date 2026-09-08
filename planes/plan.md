@@ -197,7 +197,9 @@ Antes de tocar nada, el doer lee `documentacion/contexto-repo.md` (mapa de arqui
 ### Checks
 
 Sí hay test runner: vitest `^5.0.0` en `packages/server` y `packages/web`, desde el commit
-`03a8d80` (anterior a PR-03 y PR-04). Hoy: 11 ficheros, 91 tests, sin API key ni red.
+`03a8d80` (anterior a PR-03 y PR-04). Eran 11 ficheros y 91 tests cuando se escribió este
+plan; **cerrado el PR-08 son 15 ficheros y 137 tests** (server 12/117, web 3/20), sin API
+key ni red.
 
 ```bash
 pnpm run typecheck                            # gate principal
@@ -206,8 +208,8 @@ pnpm --filter @proxus/web run build
 pnpm --filter @proxus/server run eval:tutor:artifact-authoring   # requiere API key
 ```
 
-> PR-08 paso 1 añade un `test` en el `package.json` de la raíz; a partir de ahí,
-> `pnpm run test`.
+> PR-08 paso 1 añadió un `test` en el `package.json` de la raíz; a partir de ahí,
+> `pnpm run test`. Hecho.
 
 QA manual: `docs/testing.md`.
 
