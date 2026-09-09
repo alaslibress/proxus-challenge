@@ -56,7 +56,12 @@ El humano es quien delega: elige qué plan se implementa y se lo pasa al doer.
   - Enlaces a sesiones de Claude / `Claude-Session:`.
   - Cualquier mención a que el cambio fue generado por un agente.
 - Los commits y PRs se escriben como si los firmara el autor humano del repo,
-  en inglés, formato Conventional Commits.
+  en formato Conventional Commits. El idioma sigue al del tramo —castellano en
+  los commits de PR, inglés en los de infraestructura anteriores—; el detalle,
+  en [`GUIA-DOER.md`](./GUIA-DOER.md) §7.
+- Esta norma es permanente y retroactiva: el historial se reescribió entero (54
+  commits) para retirar los trailers `Co-Authored-By:` y `Claude-Session:`, y se
+  limpiaron los cuerpos de las ocho PRs. Todos los SHA cambiaron con ello.
 
 ---
 
@@ -114,7 +119,7 @@ Documentos de origen, en `documentacion/`:
 | PR-05 | [`pr-05-transporte-ndjson/plan.md`](./pr-05-transporte-ndjson/plan.md) | Ruta `POST /api/artifacts/:id/submit/stream` con estados discretos, lector NDJSON resiliente compartido en web y cierre siempre con frame terminal. | mergeado | PR-04 |
 | PR-06 | [`pr-06-trazabilidad/plan.md`](./pr-06-trazabilidad/plan.md) | Trazabilidad nativa: log determinista en Markdown bajo `.data/sessions/`, escrito con `Effect.forkDetach` fuera del camino crítico. | mergeado | PR-04 |
 | PR-07 | [`pr-07-ui-observabilidad/plan.md`](./pr-07-ui-observabilidad/plan.md) | UI del `ArtifactWorkspace`: estado de evaluación en un atom, los dos profes activos a la vez, Juez después, y render del feedback con las citas y su badge de verificación. | mergeado | PR-05 |
-| PR-08 | [`pr-08-evals-entrega/plan.md`](./pr-08-evals-entrega/plan.md) | Cierre de la cobertura de tests que dejaron PR-03, PR-05 y PR-06 (`gemini-schema`, `trace-format`, `readNdjson`, stream de evaluación), script `test` en la raíz, QA final y README de entrega. **No recortable.** | implementado, PR #7 abierto | — |
+| PR-08 | [`pr-08-evals-entrega/plan.md`](./pr-08-evals-entrega/plan.md) | Cierre de la cobertura de tests que dejaron PR-03, PR-05 y PR-06 (`gemini-schema`, `trace-format`, `readNdjson`, stream de evaluación), script `test` en la raíz, QA final y README de entrega. **No recortable.** | mergeado | — |
 
 Estados: `por diseñar` → `borrador` → `listo para implementar` → `en curso` →
 `implementado, PR #N abierto` → `mergeado`.
@@ -197,7 +202,7 @@ Antes de tocar nada, el doer lee `documentacion/contexto-repo.md` (mapa de arqui
 ### Checks
 
 Sí hay test runner: vitest `^5.0.0` en `packages/server` y `packages/web`, desde el commit
-`03a8d80` (anterior a PR-03 y PR-04). Eran 11 ficheros y 91 tests cuando se escribió este
+`2bb42f4` (anterior a PR-03 y PR-04). Eran 11 ficheros y 91 tests cuando se escribió este
 plan; **cerrado el PR-08 son 15 ficheros y 137 tests** (server 12/117, web 3/20), sin API
 key ni red.
 

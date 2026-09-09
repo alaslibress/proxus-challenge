@@ -2,7 +2,7 @@
 
 - **Rama**: `feat/evals-entrega`
 - **Depende de**: nada. PR-01 a PR-07 están **implementados y mergeados en `main`**
-  (`git log`: `09bd378` merge de `feat/ui-observabilidad`). Este PR se puede empezar hoy.
+  (`git log`: `4d078aa` merge de `feat/ui-observabilidad`). Este PR se puede empezar hoy.
 - **Bloquea a**: nada. Es el último.
 - **Estado**: listo para implementar
 - **Contiene LLM**: **no**. Todo lo que este PR añade corre sin API key y sin red.
@@ -118,9 +118,9 @@ llama desde un test.
 
 ### De dónde vino vitest (para no volver a atribuirlo mal)
 
-vitest **no** llegó con PR-03 ni con PR-04. Entró en el commit `03a8d80`
+vitest **no** llegó con PR-03 ni con PR-04. Entró en el commit `2bb42f4`
 *"test: add unit test suite with vitest (22 tests, all passing)"*, que `git merge-base
---is-ancestor` confirma **anterior** tanto a PR-03 (`cd8d136`) como a PR-04 (`564406e`).
+--is-ancestor` confirma **anterior** tanto a PR-03 (`ac1f8cf`) como a PR-04 (`746edc4`).
 Vino con la línea de trabajo de producto (PR-09..PR-13), no con la de evaluación.
 
 ## Problema
@@ -403,7 +403,7 @@ principio a fin:
       otras dos celdas de esa misma fila**, que hoy contradicen la cabecera de este plan:
       - *Depende de*: dice `PR-07` → debe decir `—`. La cabecera de este plan dice
         **"Depende de: nada"**, porque PR-01..PR-07 ya están mergeados en `main`
-        (`09bd378`).
+        (`4d078aa`).
       - *Alcance*: dice *"Evals deterministas sin API key (modelo falso + funciones puras),
         QA final y README de entrega"* → describe el plan **viejo**, que ya no es este.
         Sustituir por el alcance real: *"Cierre de la cobertura de tests que dejaron PR-03,
@@ -540,7 +540,7 @@ pnpm --filter @proxus/server run eval:tutor:artifact-authoring   # requiere API 
   | `gemini.ts:285` para `streamText: Stream.empty` | `gemini.ts:468`. |
   | `toolParameters` en `gemini.ts:124-154` | `:154-190`. |
   | El `===` de la corrección en `artifact.ts:463` | `artifact.ts:207`. |
-  | Nota *"Depende de PR-02, PR-03, PR-04, PR-06"* y estado `borrador` | PR-01..PR-07 están mergeados en `main` (`09bd378`). Sin dependencias pendientes; estado `listo para implementar`. |
+  | Nota *"Depende de PR-02, PR-03, PR-04, PR-06"* y estado `borrador` | PR-01..PR-07 están mergeados en `main` (`4d078aa`). Sin dependencias pendientes; estado `listo para implementar`. |
   | Trampa de `node --env-file` como razón para evitar la bandera | Sigue siendo cierta como trampa del repo, pero ya no aplica: los tests corren con vitest, no con `node --env-file`. Nota eliminada. |
 
   **Alcance nuevo**, por capacidades que PR-03, PR-05 y PR-06 introdujeron después de

@@ -1,7 +1,7 @@
 # PR-1.5 — Sistema visual: tokens, tipografía y repintado
 
 - **Rama**: `feat/sistema-visual`
-- **Depende de**: PR-01 (mergeado, `946f894`).
+- **Depende de**: PR-01 (mergeado, `21eff12`).
 - **Orden de ejecución**: **inmediatamente después del PR-01, antes que ningún otro.**
   Va primero a propósito: cada PR posterior que pinte UI nace ya con los tokens puestos.
   Orden completo: PR-01 → **PR-1.5** → PR-09 → PR-10 → PR-11 → PR-02 … PR-08.

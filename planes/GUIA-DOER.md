@@ -18,7 +18,8 @@ Lo que **no** haces, nunca:
 - **No editas ningún `plan.md`.** Son entrada de solo lectura. Las correcciones las
   escribe el thinker en la sección `Historial` del plan.
 - **No añades alcance.** Ni features, ni refactors de paso, ni "ya que estoy".
-- **No falseas la autoría.** Firmas tu trabajo como lo que es; la norma exacta, en §7.
+- **No falseas la autoría, ni la adornas.** El commit lo firma el autor humano del repo y
+  no lleva ninguna línea de atribución a un agente; la norma exacta, en §7.
 
 Si detectas un problema, la respuesta correcta es *"el paso 4 dice X pero el código hace
 Y, ¿cómo procedo?"*, no arreglarlo por tu cuenta y seguir.
@@ -64,8 +65,8 @@ El id del material es el nombre del fichero sin `.pdf`.
 ### El gate
 
 No hay eslint. **Sí hay test runner**, y no lo trajo ningún PR de esta serie: vitest entró
-en el commit `03a8d80` *"test: add unit test suite with vitest (22 tests, all passing)"*,
-**anterior** a PR-03 (`cd8d136`) y a PR-04 (`564406e`). Hoy: `vitest ^5.0.0` como
+en el commit `2bb42f4` *"test: add unit test suite with vitest (22 tests, all passing)"*,
+**anterior** a PR-03 (`ac1f8cf`) y a PR-04 (`746edc4`). Hoy: `vitest ^5.0.0` como
 devDependency en `packages/server` (`package.json:26`, scripts `test`/`test:watch` en
 `package.json:16-17`, config en `vitest.config.ts`) y en `packages/web`
 (`package.json:29`, scripts en `package.json:11-12`). Ambas configs recogen
@@ -94,8 +95,8 @@ escrito para dejar el repo compilando.
 ## 3. El roadmap, que ya está cerrado
 
 **Los 16 planes de `planes/` están implementados.** Los 15 primeros están mergeados en
-`main`; el último es el PR-08, que aterrizó en `cc9f989` y vive en la rama
-`feat/evals-entrega` —con el PR #7 todavía abierto—, sobre la que después han seguido
+`main`; el último es el PR-08, que aterrizó en `e2e8319`, en la rama `feat/evals-entrega`,
+y entró en `main` con el merge del PR #7 (`351aaac`), sobre el que después han seguido
 entrando commits de documentación. No queda ninguno pendiente, así que esta tabla ya no es
 una cola de trabajo: es el **registro del orden real en que se hicieron**, y sirve para dos
 cosas.
@@ -312,55 +313,43 @@ curl -N -X POST http://localhost:3000/api/artifacts/<id>/submit/stream \
 
 **Los PR los abres tú.** Contra `origin` (el fork `alaslibress/proxus-challenge`).
 
-### Atribución: un trailer, y sólo uno
+### Atribución: ninguna línea, de ningún tipo
 
-Un commit de feature **termina con una única línea de atribución**, separada del cuerpo por
-una línea en blanco:
+Un commit de feature **termina en su cuerpo**. Detrás no va nada:
 
-```
-Co-Authored-By: Claude <modelo> <noreply@anthropic.com>
-```
+- Nada de `Co-Authored-By: Claude …`, ni ningún otro coautor de agente.
+- Nada de `Claude-Session: https://claude.ai/code/session_…`.
+- Nada de `🤖 Generated with Claude Code`, ni en el commit ni en el cuerpo del PR.
+- Ninguna mención, en ninguna forma, a que el cambio lo escribió un agente.
 
-Detalles del formato:
+El motivo es una decisión del autor del repo, y vale para todo el proyecto: **la autoría de
+la entrega es suya**. Quien revise esta entrega lee el historial para juzgar el trabajo, no
+para auditar con qué herramienta se tecleó; un trailer de agente no le aporta nada que
+necesite y sí desvía el foco. Es exactamente la regla que ya fija
+[`plan.md`](./plan.md) §4, y ahora las dos dicen lo mismo.
 
-- `Co-Authored-By:` con esa capitalización exacta y el correo `noreply@anthropic.com`.
-- `<modelo>` es el nombre del modelo que hizo **tu** trabajo, en **tu** sesión. La regla no
-  fija uno concreto y no debe fijarlo: fija el formato. En el repo conviven ya
-  `Claude Sonnet 4.6`, `Claude Sonnet 5` (`ff0d0a2`, `564406e`, `c930596`, `9864238`) y
-  `Claude Opus 5` (`139e9b1`, `cc9f989`). Pon el tuyo; no copies el de otro commit.
-- Es la **última línea del mensaje**. Nada detrás.
-- Nada de `🤖 Generated with Claude Code` en el mensaje de commit: ningún commit del repo
-  lo lleva.
+#### El historial se reescribió para retirarlas
 
-Se conserva porque **es un trailer con vida propia**: GitHub lo parsea, atribuye coautoría
-en el gráfico de contribuciones del repositorio y sigue significando algo para quien lea el
-historial dentro de un año, sin acceso a nada más.
+Una versión previa de esta guía **exigía** `Co-Authored-By:` y afirmaba que el historial no
+se tocaría. Ninguna de las dos cosas sigue siendo cierta: se reescribió el historial entero
+—54 commits— para eliminar los trailers `Co-Authored-By:` y `Claude-Session:`, y se
+limpiaron los cuerpos de las ocho PRs (las siete del fork, #1–#7, y la #7 de upstream) del
+pie `🤖 Generated with Claude Code` y su URL de sesión.
 
-#### `Claude-Session:` queda descartado
+**Todos los SHA del repo cambiaron con esa reescritura.** Dos consecuencias prácticas:
 
-Los commits de feature del tramo PR-02→PR-08 llevan, además, una segunda línea
-`Claude-Session: https://claude.ai/code/session_…`. **No la pongas en commits nuevos.** Es
-una URL que sólo puede abrir quien lanzó esa sesión; para cualquier otro revisor del
-repositorio —que es todo el público de una entrega— es un enlace muerto que no verifica
-nada. Un trailer que nadie puede seguir no documenta: decora.
+- Cualquier hash citado en un documento escrito antes de la reescritura es inválido. Los
+  que aparecen en esta guía y en los planes están reemplazados por los nuevos, verificados
+  contra `git log`. Si citas uno, verifícalo tú también antes de escribirlo.
+- Si arrastras un clon o una rama anteriores, rehazlos desde `origin/main`; no intentes
+  rebasar encima.
 
-#### El historial previo es heterogéneo, y no se reescribe
+Si en `git log` no ves ninguna línea de atribución, es lo esperado, no una deriva que
+arreglar.
 
-Esta regla vale **de aquí en adelante**. Lo ya empujado se queda como está:
-
-- Siete PRs mergeados o abiertos, con commits que llevan las **dos** líneas.
-- El nombre del modelo varía entre commits (`Claude Sonnet 4.6`, `Claude Sonnet 5`,
-  `Claude Opus 5`), porque varió el modelo que los escribió. Eso es correcto: el trailer
-  describe un hecho, y el hecho no fue el mismo en todos.
-- Las URLs de sesión se repiten o difieren sin patrón (`139e9b1` y `564406e` comparten
-  `session_01E6EhMpaAjjyQ7bCSmaeGxw`; `cc9f989` lleva otra).
-
-**No hay ninguna tarea de limpieza aquí.** Reescribir el historial para uniformar trailers
-cambiaría los SHA de siete PRs ya revisados a cambio de nada. Si ves esa asimetría en
-`git log`, es lo esperado, no una deriva que arreglar.
-
-Lo que sigue prohibido: **inventarse coautores humanos** y firmar como el autor del repo un
-trabajo que no hizo. La atribución describe quién escribió el código, no adorna.
+Lo que sigue prohibido, igual que antes: **inventarse coautores humanos** y firmar como el
+autor del repo un trabajo que no hizo. No atribuir no es falsear la autoría: es no colgar
+metadatos de herramienta de un commit cuyo autor humano ya consta en `git log`.
 
 ### Formato
 
@@ -372,8 +361,8 @@ Sigue el idioma del tramo en el que estés; ante la duda, castellano.
 El asunto ≤ 50 caracteres es una guía, no un muro: los commits de PR reales llegan a ~55
 porque el prefijo `PR-NN` paga su coste. El cuerpo **no** es opcional en un commit de
 feature: explica el porqué, lista los ficheros nuevos y **di lo que decidiste apartarte del
-plan y por qué** —`139e9b1` cierra explicando por qué `atoms.ts` quedó sin tocar contra lo
-que decía el plan, y `cc9f989` cuenta cómo se comprobó la suite rompiéndola a propósito.
+plan y por qué** —`5aa967d` cierra explicando por qué `atoms.ts` quedó sin tocar contra lo
+que decía el plan, y `e2e8319` cuenta cómo se comprobó la suite rompiéndola a propósito.
 Eso es el estándar.
 
 ```
@@ -381,12 +370,10 @@ feat: PR-02 evidencia de página con citas verificables
 
 Las citas necesitan una fuente de verdad contra la que verificarse.
 Renderizar las páginas como imágenes las dejaba sin comprobar.
-
-Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>
 ```
 
-(El commit real de `ff0d0a2` lleva además una línea `Claude-Session:`; el ejemplo muestra
-la forma nueva, no la histórica. Ver arriba.)
+(El mensaje acaba ahí. El commit real del PR-02, `df0204d`, tiene el cuerpo más largo pero
+acaba igual: tras la reescritura del historial ya no lleva ningún trailer detrás.)
 
 ### Antes de abrir el PR
 
@@ -399,7 +386,7 @@ la forma nueva, no la histórica. Ver arriba.)
 - [ ] **Criterio de aceptación** repasado punto por punto.
 - [ ] `git status` no muestra `.data/` (está en `.gitignore:13-14`).
 - [ ] Ningún `plan.md` modificado.
-- [ ] El commit de feature termina con `Co-Authored-By:` y **sin** `Claude-Session:` (§7).
+- [ ] El mensaje de commit termina en el cuerpo, **sin ninguna línea de atribución** (§7).
 
 ### Cuerpo del PR
 
@@ -407,13 +394,10 @@ Qué problema resuelve, qué decisiones tomaste, cómo probarlo, qué checks eje
 queda fuera. Si algo no pudiste probar —típicamente por falta de API key— **dilo
 explícitamente**: `docs/testing.md` ya lo exige.
 
-**El cuerpo del PR no lleva enlace de sesión.** Los siete PRs abiertos hasta hoy (#1–#7)
-cierran todos con el mismo pie de dos líneas —`🤖 Generated with Claude Code` y la URL
-`https://claude.ai/code/session_…`—; lo comprobé con `gh pr view N --json body`. Esos
-cuerpos se quedan como están (§7, *el historial no se reescribe*), pero **el enlace de
-sesión no se repite en PRs nuevos**, por el mismo motivo que no va en el commit: nadie más
-puede abrirlo. La línea `🤖 Generated with Claude Code` sí puede quedarse, es la convención
-de la herramienta y apunta a una URL pública. Todo lo demás del cuerpo es prosa técnica.
+**El cuerpo del PR es sólo prosa técnica: no lleva pie de agente.** Ni
+`🤖 Generated with Claude Code`, ni enlace de sesión, ni nada equivalente (§7). Las ocho PRs
+ya abiertas llevaban ese pie de dos líneas; se limpiaron todas, junto con la reescritura del
+historial, así que hoy ninguna lo tiene y las nuevas tampoco lo llevan.
 
 ---
 
@@ -421,7 +405,7 @@ de la herramienta y apunta a una URL pública. Todo lo demás del cuerpo es pros
 
 ### 2026-09-08 — Puesta al día tras cerrar el roadmap (PR-01…PR-13)
 
-Revisión completa de la guía contra el código en `cc9f989`, rama `feat/evals-entrega`.
+Revisión completa de la guía contra el código en `e2e8319`, rama `feat/evals-entrega`.
 Trece PRs mergeados habían dejado buena parte del documento describiendo un repo que ya no
 existe. Lo corregido:
 
@@ -473,10 +457,10 @@ existe. Lo corregido:
   PR-04→PR-08. Entre una regla que nadie aplica y un historial consistente, gana el
   historial: la sección pasa a **exigir** atribución al final del commit de feature, con el
   formato tomado de los commits reales. Se documenta que el nombre del modelo varía
-  (`Claude Sonnet 5` en `564406e`, `Claude Opus 5` después). Se conserva la prohibición que
+  (`Claude Sonnet 5` en `746edc4`, `Claude Opus 5` después). Se conserva la prohibición que
   sí se respeta: nada de coautores humanos inventados. El bloque de *Formato* pasa a
   reflejar el idioma real (castellano en los commits de PR) y a exigir cuerpo en los
-  commits de feature, con `139e9b1` y `cc9f989` como listón.
+  commits de feature, con `5aa967d` y `e2e8319` como listón.
 - **Checklist previa al PR** — fuera `styles.generated.css`; dentro `pnpm -r test` sin
   bajar el recuento, el guard de color para PRs de UI y el bloque de atribución.
 
@@ -524,3 +508,34 @@ Corregido además, verificando contra el repo en vez de contra la memoria:
 - **§5, la trampa de `Chat.tsx`** — revisada, no corregida: `Chat.tsx:4,13` consume
   `useTutorChat` y la lógica está en `use-tutor-chat.ts:26`. Las tres referencias son
   correctas.
+
+### 2026-09-09 — Se retira toda la atribución, y el historial se reescribe
+
+Decisión del autor del repo, permanente y para todos sus proyectos: **los commits y los
+cuerpos de PR no llevan ninguna línea de atribución a un agente.** La autoría de la entrega
+es suya. Esto revoca lo acordado en las dos entradas anteriores, que llegaron a **exigir**
+`Co-Authored-By:` y a declarar el historial intocable:
+
+- **§7, *Atribución*** — la sección pasa de *"un trailer, y sólo uno"* a *"ninguna línea, de
+  ningún tipo"*: fuera `Co-Authored-By:`, fuera `Claude-Session:`, fuera
+  `🤖 Generated with Claude Code`. Desaparecen con ella la subsección que justificaba
+  conservar el trailer, la lista de nombres de modelo por commit y el apartado *el historial
+  previo es heterogéneo, y no se reescribe*, que hoy dice lo contrario de lo que pasó. Se
+  conserva lo único que no cambia: nada de coautores humanos inventados.
+- **§7, *Formato*** — el ejemplo de commit termina en el cuerpo; se elimina el trailer y la
+  nota que avisaba de que el commit real de PR-02 llevaba además un `Claude-Session:`.
+- **§7, *Cuerpo del PR*** — decía que las siete PRs cerraban con el pie de dos líneas y que
+  esos cuerpos se quedaban como estaban. Se limpiaron las ocho (fork #1–#7 y la #7 de
+  upstream); el párrafo lo refleja.
+- **Checklist previa al PR** — el ítem *"termina con `Co-Authored-By:` y sin
+  `Claude-Session:`"* pasa a *"termina en el cuerpo, sin ninguna línea de atribución"*.
+- **§1** — *"Firmas tu trabajo como lo que es"* se leía como una obligación de atribuir;
+  reescrito para que apunte a la regla nueva.
+- **Hashes** — la reescritura del historial (54 commits) cambió **todos** los SHA. Los que
+  citaban esta guía y los planes se han sustituido por los nuevos, casados por asunto y
+  verificados uno a uno contra `git log`. Los tocados aquí: PR-02 `df0204d`, PR-03
+  `ac1f8cf`, PR-04 `746edc4`, PR-05 `9a0f696`, PR-06 `9b08439`, PR-07 `5aa967d`, PR-08
+  `e2e8319`, PR-12 `74b6ea9`, PR-01 `21eff12`, la suite de vitest `2bb42f4` y el merge de
+  `feat/ui-observabilidad` `4d078aa`.
+- **§3** — el PR #7 ya no está abierto: entró en `main` con el merge `351aaac`. Corregido
+  aquí y en la fila del PR-08 de `plan.md`.

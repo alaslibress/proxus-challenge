@@ -1,7 +1,7 @@
 # PR-12.1 — La fuga sigue: señal fiable y reintento acotado
 
 - **Rama**: `fix/fuga-tool-calls-reintento`
-- **Depende de**: PR-12 (`28db32e`, ya mergeado). Este PR **corrige el PR-12**, no lo
+- **Depende de**: PR-12 (`74b6ea9`, ya mergeado). Este PR **corrige el PR-12**, no lo
   repite.
 - **Orden de ejecución**: **el siguiente.** El bug sigue vivo.
 - **Conflicto conocido**: toca `gemini.ts` (el mismo fichero que el PR-12), las dos skills

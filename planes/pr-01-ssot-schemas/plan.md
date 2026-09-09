@@ -291,7 +291,7 @@ guardados siguen decodificando.
 > nada de lo de arriba: se anota aquí porque es el sitio donde un lector futuro lo va a
 > buscar.
 
-Con este PR ya mergeado (`946f894`) y antes de arrancar la fase 2 del roadmap
+Con este PR ya mergeado (`21eff12`) y antes de arrancar la fase 2 del roadmap
 ([`tech-spec.md §6`](../../documentacion/tech-spec.md)) apareció un problema que el
 roadmap no contemplaba: **no había sistema visual**. Cada componente pintaba con clases
 literales de Tailwind (`bg-slate-900`, `border-sky-400`, `bg-blue-600`), así que todo PR

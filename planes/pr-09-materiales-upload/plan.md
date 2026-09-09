@@ -1,7 +1,7 @@
 # PR-09 — Subida de PDFs desde la UI
 
 - **Rama**: `feat/materiales-upload`
-- **Depende de**: PR-01 (mergeado, `946f894`).
+- **Depende de**: PR-01 (mergeado, `21eff12`).
 - **Orden de ejecución**: **inmediatamente después del PR-01 y antes del PR-02.** La
   numeración 09–11 es identidad, no orden: estos tres PRs se intercalan al principio del
   roadmap porque son de producto visible y baratos.
@@ -184,7 +184,7 @@ export class InvalidMaterialFile extends Data.TaggedError("InvalidMaterialFile")
 ### Paso 0 — Comprobación previa
 
 1. [ ] `git switch -c feat/materiales-upload` desde `main` con el PR-01 dentro
-       (`git log --oneline -1` debe mostrar `946f894` o un descendiente).
+       (`git log --oneline -1` debe mostrar `21eff12` o un descendiente).
 2. [ ] `grep -rn "multipart\|FormData" packages/*/src` → **0 aciertos**. Si hay alguno,
        para: alguien ya empezó esto.
 3. [ ] `pnpm run typecheck` en verde antes de tocar nada.

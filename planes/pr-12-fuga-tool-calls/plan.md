@@ -8,7 +8,7 @@
   prompt del tutor y §Paso 4 baja `maxSteps`. Este PR toca el mismo prompt y el mismo
   bucle. **Se implementa antes**, y el thinker fusionará las reglas de este PR en el Paso 2
   del PR-11 tras el merge.
-- **Estado**: mergeado (`28db32e`) — **no cerró el bug**, continúa en el PR-12.1
+- **Estado**: mergeado (`74b6ea9`) — **no cerró el bug**, continúa en el PR-12.1
 - **Contiene LLM**: sí. Cambia el prompt del tutor y el formato del historial que ve el
   modelo. Todo lo de aquí es no determinista: la verificación es empírica.
 - **Origen**: incidente reportado en producción local.

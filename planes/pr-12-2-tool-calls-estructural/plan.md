@@ -1,7 +1,7 @@
 # PR-12.2 — Quitar la prosa del contrato de tool calls
 
 - **Rama**: `fix/tool-calls-estructural`
-- **Depende de**: PR-12 (`28db32e`) y PR-12.1, ambos mergeados.
+- **Depende de**: PR-12 (`74b6ea9`) y PR-12.1, ambos mergeados.
 - **Orden de ejecución**: **el siguiente.**
 - **Estado**: borrador
 - **Contiene LLM**: sí.
