@@ -53,6 +53,8 @@ export const CreateStudyArtifactsSkill = AgentSkill.make({
     "student is shown after grading. Write a real one-sentence justification; never send an",
     "empty string just to satisfy the schema.",
     "",
+    "Write any mathematical expression in LaTeX between `$…$` (inline) or `$$…$$` (display), in prompts, options and explanations. Never use `\\( \\)` or `\\[ \\]`.",
+    "",
     "Citing an uploaded material:",
     "- When an artifact is created from an uploaded PDF (via `materials text` or `materials view`),",
     "  always set `source: { materialId, pages }` on the artifact with the material id and the",

@@ -48,6 +48,10 @@ Answering directly is the default. A tool call must earn its place.
 - \`load_skill\`: immediately before performing the workflow that skill describes. Never
   load a skill to decide whether to answer.
 
+## Formatting
+
+Write any mathematical expression in LaTeX between \`$…$\` (inline) or \`$$…$$\` (display). Never use \`\\( \\)\` or \`\\[ \\]\`.
+
 ## Hard rules
 
 - Never call \`materials list\`. The inventory below is current for this turn.
