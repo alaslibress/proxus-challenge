@@ -2,9 +2,9 @@ import type { AttemptEvaluationStage } from "@proxus/shared";
 import type { EvaluationRunState } from "../../domain/artifacts/evaluation-atoms.ts";
 
 const STAGE_LABEL: Record<AttemptEvaluationStage, string> = {
-  evaluating_good: "Profe Bueno analizando…",
-  evaluating_bad: "Profe Malo criticando…",
-  deliberating: "Juez deliberando validaciones del PDF…"
+  evaluating_good: "Good Teacher analysing…",
+  evaluating_bad: "Bad Teacher challenging…",
+  deliberating: "Judge deliberating and checking the PDF…"
 };
 
 const STAGE_ORDER: readonly AttemptEvaluationStage[] = ["evaluating_good", "evaluating_bad", "deliberating"];
@@ -21,8 +21,8 @@ export function EvaluationProgress({
       <div className="flex flex-wrap items-center justify-between gap-3">
         <p className="text-ink-mute" style={{ fontSize: 13 }}>
           {run.questionTotal > 0
-            ? `Pregunta ${run.questionIndex + 1} de ${run.questionTotal}`
-            : "Corrigiendo…"}
+            ? `Question ${run.questionIndex + 1} of ${run.questionTotal}`
+            : "Grading…"}
         </p>
         <button
           className="border border-line-strong bg-transparent text-ink-mute hover:bg-surface-muted"
@@ -36,7 +36,7 @@ export function EvaluationProgress({
           type="button"
           onClick={onCancel}
         >
-          Cancelar
+          Cancel
         </button>
       </div>
       <ul className="mt-3 grid gap-2">

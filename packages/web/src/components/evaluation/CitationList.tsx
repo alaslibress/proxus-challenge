@@ -7,6 +7,20 @@ export function ShortAnswerDetails({ correction }: { readonly correction: ShortA
   }
 
   const { review } = correction;
+
+  if (review.grounded === false) {
+    return (
+      <div>
+        <div className="prose prose-invert max-w-none">
+          <Streamdown>{review.feedback}</Streamdown>
+        </div>
+        <p className="mt-3 text-ink-mute" style={{ fontSize: 12.5, fontStyle: "italic" }}>
+          Graded without PDF evidence: the panel judged your answer against the expected answer.
+        </p>
+      </div>
+    );
+  }
+
   const hasVerifiedCitation = review.citas_pdf.some((citation) => citation.verified);
 
   return (
@@ -16,7 +30,7 @@ export function ShortAnswerDetails({ correction }: { readonly correction: ShortA
       </div>
       {!hasVerifiedCitation && (
         <p className="mt-3 text-ink-mute" style={{ fontSize: 12.5, fontStyle: "italic" }}>
-          Evaluación orientativa: no se pudo verificar ninguna cita, la nota es la automática.
+          Advisory evaluation: no citation could be verified, so the automatic mark stands.
         </p>
       )}
       {review.citas_pdf.length > 0 && (
@@ -44,8 +58,8 @@ export function CitationList({ citations }: { readonly citations: readonly PdfCi
             style={{ fontSize: 12, fontWeight: 600 }}
           >
             {citation.verified
-              ? `✅ Verificada · ${citation.materialId} · pág. ${citation.page}`
-              : "⚠️ Sin verificar en el PDF"}
+              ? `✅ Verified · ${citation.materialId} · p. ${citation.page}`
+              : "⚠️ Not verified against the PDF"}
           </p>
           <p className="mt-1 text-ink-soft" style={{ fontSize: 13, fontStyle: "italic" }}>
             "{citation.quote}"

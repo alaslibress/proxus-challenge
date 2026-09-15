@@ -15,6 +15,7 @@ import { artifactQuery, artifactsQuery, submitArtifactAttemptAction } from "../d
 import { streamAttemptSubmission } from "../domain/artifacts/attempt-stream.ts";
 import { evaluationRunAtom } from "../domain/artifacts/evaluation-atoms.ts";
 import { openExerciseAtom } from "../domain/artifacts/chat-context.ts";
+import { ARTIFACT_KIND_LABEL, QUESTION_TYPE_LABEL } from "../domain/artifacts/labels.ts";
 import { EvaluationProgress } from "./evaluation/EvaluationProgress.tsx";
 import { ShortAnswerDetails } from "./evaluation/CitationList.tsx";
 
@@ -275,7 +276,7 @@ function ExerciseSolver({ artifact }: { readonly artifact: Extract<Artifact, { r
             textTransform: "uppercase",
           }}
         >
-          {artifact.kind}
+          {ARTIFACT_KIND_LABEL[artifact.kind]}
         </p>
         <h2 className="text-ink" style={{ fontSize: 20, fontWeight: 600, letterSpacing: "-.02em" }}>
           {artifact.title}
@@ -283,6 +284,11 @@ function ExerciseSolver({ artifact }: { readonly artifact: Extract<Artifact, { r
         <p className="mt-2 text-ink-mute" style={{ fontSize: 13 }}>
           Answer every question, submit, and review your corrections.
         </p>
+        {artifact.kind === "quiz" && (
+          <p className="mt-2 text-ink-mute" style={{ fontSize: 12.5, fontStyle: "italic" }}>
+            A quiz is graded deterministically. The three-agent panel reviews the short answers of a test.
+          </p>
+        )}
       </header>
 
       <div className="grid gap-4">
@@ -339,7 +345,7 @@ function ExerciseSolver({ artifact }: { readonly artifact: Extract<Artifact, { r
                   disabled={unansweredQuestions.length > 0 || isSubmitting}
                   onClick={submit}
                 >
-                  {isSubmitting ? "Submitting…" : `Submit ${artifact.kind}`}
+                  {isSubmitting ? "Submitting…" : `Submit ${ARTIFACT_KIND_LABEL[artifact.kind]}`}
                 </button>
               </div>
             )}
@@ -395,12 +401,10 @@ function QuestionCard({
             style={{
               borderRadius: 7,
               padding: "6px 10px",
-              fontFamily: "var(--font-mono)",
               fontSize: 11,
-              letterSpacing: ".1em",
             }}
           >
-            {question.type}
+            {QUESTION_TYPE_LABEL[question.type]}
           </span>
           <h3
             className="text-ink"
@@ -416,7 +420,7 @@ function QuestionCard({
         <MultipleChoiceInput question={question} value={value} disabled={disabled} onChange={onChange} />
       )}
       {question.type === "true-false" && (
-        <TrueFalseInput value={value} disabled={disabled} onChange={onChange} />
+        <TrueFalseInput question={question} value={value} disabled={disabled} onChange={onChange} />
       )}
       {question.type === "short-answer" && (
         <textarea
@@ -463,32 +467,37 @@ function MultipleChoiceInput({
 }) {
   return (
     <div className="grid gap-2">
-      {question.options.map((option) => (
-        <label
-          className="flex cursor-pointer items-center gap-3 border border-line bg-surface-muted hover:bg-surface"
-          style={{ borderRadius: 16, padding: 12, transitionDuration: "120ms", transitionTimingFunction: "var(--ease-dc)" }}
-          key={option.id}
-        >
-          <input
-            type="radio"
-            name={question.id}
-            value={option.id}
-            checked={value === option.id}
-            disabled={disabled}
-            onChange={() => onChange(option.id)}
-          />
-          <span className="text-ink" style={{ fontSize: 13.5 }}>{option.text}</span>
-        </label>
-      ))}
+      {question.options.map((option) => {
+        const selected = value === option.id;
+        return (
+          <label
+            className={`flex cursor-pointer items-center gap-3 border ${selected ? "border-brand bg-brand-tint" : "border-line bg-surface-muted"} hover:bg-surface`}
+            style={{ borderRadius: 16, padding: 12, transitionDuration: "120ms", transitionTimingFunction: "var(--ease-dc)" }}
+            key={option.id}
+          >
+            <input
+              type="radio"
+              name={question.id}
+              value={option.id}
+              checked={selected}
+              disabled={disabled}
+              onChange={() => onChange(option.id)}
+            />
+            <span className="text-ink" style={{ fontSize: 13.5 }}>{option.text}</span>
+          </label>
+        );
+      })}
     </div>
   );
 }
 
 function TrueFalseInput({
+  question,
   value,
   disabled,
   onChange
 }: {
+  readonly question: { readonly id: string };
   readonly value: string;
   readonly disabled: boolean;
   readonly onChange: (value: string) => void;
@@ -498,23 +507,26 @@ function TrueFalseInput({
       {([
         ["true", "True"],
         ["false", "False"]
-      ] as const).map(([nextValue, label]) => (
-        <label
-          className="flex cursor-pointer items-center gap-3 border border-line bg-surface-muted hover:bg-surface"
-          style={{ borderRadius: 16, padding: 12, transitionDuration: "120ms", transitionTimingFunction: "var(--ease-dc)" }}
-          key={nextValue}
-        >
-          <input
-            type="radio"
-            name={`true-false-${label}`}
-            value={nextValue}
-            checked={value === nextValue}
-            disabled={disabled}
-            onChange={() => onChange(nextValue)}
-          />
-          <span className="text-ink" style={{ fontSize: 13.5 }}>{label}</span>
-        </label>
-      ))}
+      ] as const).map(([nextValue, label]) => {
+        const selected = value === nextValue;
+        return (
+          <label
+            className={`flex cursor-pointer items-center gap-3 border ${selected ? "border-brand bg-brand-tint" : "border-line bg-surface-muted"} hover:bg-surface`}
+            style={{ borderRadius: 16, padding: 12, transitionDuration: "120ms", transitionTimingFunction: "var(--ease-dc)" }}
+            key={nextValue}
+          >
+            <input
+              type="radio"
+              name={question.id}
+              value={nextValue}
+              checked={selected}
+              disabled={disabled}
+              onChange={() => onChange(nextValue)}
+            />
+            <span className="text-ink" style={{ fontSize: 13.5 }}>{label}</span>
+          </label>
+        );
+      })}
     </div>
   );
 }
