@@ -29,7 +29,7 @@ pnpm --filter @proxus/web run test         # sólo frontend
 pnpm --filter @proxus/server run test:watch
 ```
 
-Resultado actual: **17 ficheros, 151 tests, todos en verde** (server 14/131, web 3/20).
+Resultado actual: **21 ficheros, 190 tests, todos en verde** (server 16/157, web 5/33).
 
 Cubren el motor de evaluación y su degradación cuando un profe o el Juez caen, la
 verificación literal de citas, el formato de la traza Markdown, el purgado de schemas para
@@ -162,24 +162,30 @@ la nota se queda en la determinista. La ruta de degradación es real, no sólo d
    - aparece la marca `Stopped` y no hay error ni `Retry`,
    - en la consola del server, el `http.span` cierra en ese instante y no llegan más
      `agent.step` de ese turno.
-10. Flujo de respuesta corta con panel (PR-07, requiere un PDF con capa de texto en
-    `packages/server/.data/materials/pdfs/`):
-    - Pide al tutor un **test** con tres preguntas de respuesta corta de la misma página.
+10. Flujo de respuesta corta con panel (PR-07 + PR-14). **El panel ya no requiere PDF**;
+    funciona en modo `ungrounded` para cualquier test, incluso sin material subido:
+    - Pide al tutor un **test** con al menos dos preguntas de respuesta corta. Si tienes
+      un PDF con capa de texto en `packages/server/.data/materials/pdfs/`, pide que
+      el test salga de él (modo `grounded`); si no, cualquier test sirve (`ungrounded`).
     - Responde: una paráfrasis correcta, una equivocada y una en blanco. Envía.
-    - Observa el panel de progreso: **Profe Bueno** y **Profe Malo** activos a la vez,
-      luego **Juez deliberando**, y el contador *"Pregunta N de M"* avanzando. Sin barras
-      de progreso ni porcentajes.
-    - Pulsa **Cancelar** en mitad de otro envío: el formulario vuelve a ser editable y no
+    - Observa el panel de progreso: **Good Teacher** y **Bad Teacher** activos a la vez
+      (etiquetas en inglés), luego **Judge deliberating**, y el contador *"Question N of Y"*
+      avanzando. Sin barras de progreso ni porcentajes.
+    - Mientras Good Teacher o Bad Teacher están activos, comprueba el **transcript en
+      vivo**: un panel con scroll automático muestra primero el canal `thought` (en
+      itálica) y después el canal `text` actualizándose carácter a carácter.
+    - Pulsa **Cancel** en mitad de otro envío: el formulario vuelve a ser editable y no
       queda ningún estado colgado (ni `isSubmitting`, ni error fantasma).
     - Al terminar, revisa por cada `short-answer`: el feedback razonado del Juez, y sus
       citas.
-    - Comprueba las citas:
-      - una `verified: true` sale con su página, contrástala abriendo el PDF por esa
-        página;
-      - una `verified: false` sale visualmente distinta (color e icono distintos) con el
-        texto *"Sin verificar en el PDF"* y **sin número de página**.
-      - si ninguna cita quedó verificada, aparece el aviso *"Evaluación orientativa: no
-        se pudo verificar ninguna cita, la nota es la automática."*.
+    - Comprueba las citas según el modo:
+      - **grounded**: una cita `verified: true` sale con "Verified · … · p. N";
+        una `verified: false` sale visualmente distinta con "Not verified against the PDF"
+        y sin número de página. Si ninguna queda verificada, aparece "Advisory evaluation:
+        no citation could be verified, so the automatic mark stands."
+      - **ungrounded** (sin fuente): aparece el aviso "Advisory evaluation: no citation
+        could be verified, so the automatic mark stands." junto con la nota de que el
+        panel juzgó contra la respuesta esperada sin evidencia PDF.
     - Con `GEMINI_MODEL` apuntando a un modelo inexistente, repite el envío: debe salir
       la corrección determinista sin `review` y sin romper el layout.
     - Con el endpoint de streaming caído (o inaccesible), el envío debe seguir
@@ -189,6 +195,8 @@ la nota se queda en la determinista. La ruta de degradación es real, no sólo d
       siempre: no pasan por el panel.
     - Un artifact `test` creado antes de PR-04 (sin `source`, sin `review` posible) se
       corrige y se renderiza sin huecos ni errores.
+    - **Caso quiz**: envía un intento de un quiz (solo multiple-choice/true-false). No
+      debe aparecer ningún panel de progreso; la corrección es instantánea y determinista.
 11. **Fuga del volcado de página al agotarse el presupuesto de pasos** (requiere API key).
     Es el bug que destapó esta QA: el harness guardaba el último tool result y, sin pasos,
     lo devolvía como si fuera la respuesta del tutor.

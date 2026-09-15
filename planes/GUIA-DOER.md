@@ -94,12 +94,12 @@ escrito para dejar el repo compilando.
 
 ## 3. El roadmap, que ya está cerrado
 
-**Los 16 planes de `planes/` están implementados.** Los 15 primeros están mergeados en
-`main`; el último es el PR-08, que aterrizó en `e2e8319`, en la rama `feat/evals-entrega`,
-y entró en `main` con el merge del PR #7 (`351aaac`), sobre el que después han seguido
-entrando commits de documentación. No queda ninguno pendiente, así que esta tabla ya no es
-una cola de trabajo: es el **registro del orden real en que se hicieron**, y sirve para dos
-cosas.
+**Los 17 planes de `planes/` están implementados.** Los primeros 16 están mergeados en
+`main`; el PR-14 (`fix/solucion-errores`) está en curso. Los 15 primeros (PR-01…PR-13)
+están mergeados en `main`; el PR-08 aterrizó en `e2e8319`, en la rama `feat/evals-entrega`,
+y entró en `main` con el merge del PR #7 (`351aaac`). No queda ninguno pendiente salvo
+PR-14, así que esta tabla ya no es una cola de trabajo: es el **registro del orden real en
+que se hicieron**, y sirve para dos cosas.
 
 1. **Arqueología.** Cuando el código te sorprenda, el plan del PR que lo introdujo explica
    el porqué mejor que cualquier comentario.
@@ -129,6 +129,7 @@ encadenan sobre la firma de `evaluate`.
 | [06](./pr-06-trazabilidad/plan.md) | `feat/trazabilidad` | Traza auditable en Markdown. |
 | [07](./pr-07-ui-observabilidad/plan.md) | `feat/ui-observabilidad` | Los tres agentes visibles y las citas con su badge. |
 | [08](./pr-08-evals-entrega/plan.md) | `feat/evals-entrega` | Evals sin API key y README. **No recortable.** |
+| [14](./pr-14-solucion-errores/plan.md) | `fix/solucion-errores` | Cuatro bugs de QA: panel siempre corre, tutor sabe el ejercicio abierto, agrupación radio, razonamiento en vivo. |
 
 El plan de recorte que esta sección traía —tirar el PR-06, luego el resaltado de citas del
 PR-07, luego casos del panel del PR-08— **no llegó a usarse**: entraron los tres enteros.

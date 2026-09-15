@@ -27,10 +27,7 @@ Effect v4 **beta**, `4.0.0-beta.83` pineado exacto en los cuatro paquetes, sin r
 `rewriteRelativeImportExtensions`. Esto último obliga a que **todo import relativo lleve
 la extensión `.ts`/`.tsx`**; se cumple al 100% en el código existente.
 
-**Test runner**: `vitest@5` en `packages/server` (39 tests) y `packages/web` (10 tests). Suites:
-- Server: `message.ts` constructores (7), `session.ts` funciones puras (7), `gemini.ts` encode/decode thoughtSignature (8), `tutor-chat-service.ts` buildMaterialsContext (5), `material.ts` saneado y colisión de nombres de fichero (12).
-- Web: `stream.ts` `isAbortError` predicado (7), `resolveStreamFailure` parada vs fallo (3).
-El gate sigue siendo `pnpm run typecheck`; los tests son la segunda capa.
+**Test runner**: `vitest@5` en `packages/server` (16 ficheros, 157 tests) y `packages/web` (5 ficheros, 33 tests), todos deterministas sin llamada de red. El gate sigue siendo `pnpm run typecheck`; los tests son la segunda capa.
 
 ---
 
@@ -65,6 +62,11 @@ Chat.tsx ──fetch POST /api/tutor/chat/stream──► server.ts (HttpRouter 
   lo usa para el chat; el consumidor del streaming de intentos (Paso 6 de PR-05) queda
   pendiente porque ese paso quedó desactualizado tras el PR-10 y requiere que el thinker
   lo reescriba primero.
+- **`openExercise` (PR-14)**: el cuerpo JSON de la petición puede llevar un campo
+  opcional `openExercise: { artifactId: string; exerciseIndex: number }`. El servidor
+  lo pasa al system prompt del tutor para que sepa qué ejercicio tiene el alumno abierto
+  en ese momento, sin necesidad de que el alumno lo mencione. El campo es completamente
+  opcional; si no viene, el tutor funciona igual que antes.
 - **`AbortSignal` (PR-10)**: el cliente cancela la petición con `AbortController`. **El servidor sí cancela**, verificado midiendo: al cortar el cliente a los 7 s, el `http.span` cierra en ese instante, la llamada a Gemini en vuelo se queda sin respuesta y no se registra un `agent.step` más — igual por la ruta directa que a través del proxy de Vite. La cadena es `NodeHttpServer.ts:195-197` (interrumpe el fiber al cerrarse la conexión) → `Stream.callback` en `harness/session.ts:51` (ata el bucle al scope del stream) → `gemini.ts:356-362` (pasa el `signal` al `fetch`). `Stop` conserva los mensajes ya recibidos y **no** repuebla el input: es una parada limpia, no un deshacer (ver §7).
 
 ---
@@ -222,18 +224,30 @@ documentación y el schema se separan, se pone rojo.
 **Desde PR-04, short-answer ya no se queda ahí.** `POST /api/artifacts/:id/submit`
 encadena, tras `gradeAttempt`, un `EvaluationEngineService`
 (`packages/server/src/domain/evaluation/engine.ts`) que ejecuta un panel de tres agentes
-Gemini —Profe Bueno, Profe Malo y Juez— en paralelo (`Effect.all({ mode: "result" })`,
-nunca `Promise.all`) sobre el texto real de la página del PDF (`sourcePage` de la
-pregunta, o todas las páginas del material si no hay `sourcePage`). El Juez devuelve
-`FinalFeedbackSchema` (JSON estructurado con `citas_pdf`), y cada cita se verifica contra
-el texto original con `verifyCitations` (PR-02). El veredicto del panel **solo sube** la
-nota de una respuesta corta cuando hay al menos una cita `verified: true`; nunca la baja.
-Sin evidencia (sin página, sin texto extraíble, o si el LLM falla) se conserva
-íntegra la corrección `===` determinista — es la ruta de reserva declarada, una
-desviación consciente del ADR-01 documentada en `planes/pr-04-evaluation-engine/plan.md`.
+Gemini —Good Teacher, Bad Teacher y Judge— en paralelo (`Effect.all({ mode: "result" })`,
+nunca `Promise.all`). El panel siempre corre, incluso para artifacts sin `source`.
+
+**Dos modos de evaluación** (`EvaluationMode` en `evaluation/prompts.ts`):
+
+- **`grounded`**: el artifact tiene `source`; el motor extrae el texto de la página
+  (`sourcePage` de la pregunta, o todas las páginas del material), lo inyecta en el
+  prompt de los profes y el Juez devuelve `citas_pdf`. Cada cita se verifica con
+  `verifyCitations` (PR-02). La nota solo sube si `is_correct: true` y al menos una cita
+  tiene `verified: true`.
+- **`ungrounded`**: el artifact no tiene `source` (o no hay material accesible); el motor
+  sigue ejecutando el panel pero los prompts no incluyen evidencia. El Juez devuelve
+  `citas_pdf: []`. La nota sube con solo `is_correct: true`, ya que no hay citas que
+  verificar. El feedback lleva `grounded: false`, que la UI muestra como aviso.
+
 `reviewGradedAttempt` (`domain/evaluation/review.ts`) nunca falla: cualquier error del
 panel se traga y el attempt determinista queda intacto. Multiple-choice y true-false no
 pasan por el panel: siguen siendo 100% deterministas y sin latencia añadida.
+
+**Contrato NDJSON de corrección.** El endpoint de streaming emite cuatro tipos de frame:
+- `{ type: "status", value, questionId, questionIndex, questionTotal }` — etapa del panel.
+- `{ type: "reasoning", agent, channel, delta, questionId, questionIndex, questionTotal }` — delta de texto en vivo de Good Teacher o Bad Teacher. `agent` ∈ `"good_teacher" | "bad_teacher"`, `channel` ∈ `"thought" | "text"`.
+- `{ type: "done", payload }` — attempt graded final.
+- `{ type: "error", message }` — error irrecuperable (no aborta el stream; el done puede llegar después).
 
 **Desde PR-06, cada corrección de una short-answer deja traza en disco.** El motor
 (`engine.ts`) devuelve, junto al veredicto, un borrador de `EvaluationTraceEntry`
@@ -274,9 +288,10 @@ no.
 
 Los handlers de materiales usan `Effect.catchTag("MaterialRepositoryError", e => Effect.die(e))` para errores de infraestructura y `Effect.fail({...})` para errores de dominio tipados (404). Los demás handlers terminan en `Effect.orDie`: 500 sin canal tipado.
 
-**Los artifacts no guardan de qué material salieron**: no hay `materialId` ni páginas de
-origen. Sin ese enlace, nada puede saber qué texto habría que citar para justificar
-una corrección.
+**Los artifacts guardan su origen en `source`** (`packages/shared/src/schemas/artifact.ts`):
+campo opcional `{ materialId, pages }` que el motor de evaluación usa para extraer el
+texto de evidencia (modo `grounded`). Artifacts sin `source` o cuyo material no sea
+accesible usan modo `ungrounded` (ver §5 arriba).
 
 Los schemas de artifacts (`Artifact`, `QuizQuestion`, `ArtifactAttempt`, etc.) viven
 exclusivamente en `packages/shared/src/schemas/artifact.ts` (SSOT desde PR-01).
@@ -301,8 +316,15 @@ modelo está devolviendo resúmenes de razonamiento (no esperado sin `includeTho
 
 Tres límites que condicionan cualquier diseño:
 
-1. **`streamText: () => Stream.empty`** (`:285`). El streaming a nivel de proveedor no
-   existe. Lo que llega a la UI son mensajes completos del bucle del agente.
+1. **`streamText` vía SSE (PR-14).** El adaptador implementa streaming real contra
+   `:streamGenerateContent?alt=sse` con `thinkingConfig: { includeThoughts: true }`.
+   Un reader loop ingiere los chunks, `parseSseChunk` (`gemini-sse.ts`) los parte en
+   eventos SSE completos, y por cada parte del candidato emite frames codificados de
+   Effect (`text-start`/`text-delta`/`text-end` y `reasoning-start`/`reasoning-delta`/
+   `reasoning-end`). Las partes con `thought: true` van al canal `reasoning`; el resto
+   al canal `text`. Errores del stream propagan vía `Queue.failCause`. El bucle del
+   agente (`session.ts`) sigue usando `generateText` para los pasos de tool-call; solo
+   el motor de evaluación usa `streamText`.
 2. **Salida estructurada (PR-03).** El adaptador ahora honra `options.responseFormat`: si
    es `{ type: "json", schema, ... }`, `requestBody` añade
    `generationConfig: { responseMimeType: "application/json", responseSchema }`, con
@@ -366,13 +388,20 @@ streaming no lleva `reactivityKeys`, a diferencia de `submitArtifactAttemptActio
 `error` pasa a `phase: "error"`. Si el `fetch` falla antes del primer frame (streaming
 caído), cae a `submitArtifactAttemptAction` (modo promesa) como red de seguridad. El
 panel en curso se pinta con `EvaluationProgress`
-(`components/evaluation/EvaluationProgress.tsx`): tres filas fijas, `aria-live="polite"`,
-sin porcentajes ni tiempos, y un botón Cancelar que aborta el stream y vuelve a `idle`.
-El feedback del Juez se pinta con `ShortAnswerDetails`/`CitationList`
-(`components/evaluation/CitationList.tsx`): las citas `verified: false` no llevan página
-y se distinguen visualmente (color e icono distintos) de las verificadas, y si ninguna
-cita quedó verificada se avisa que la nota es la automática. Multiple-choice y
-true-false no cambian: no pasan por `review`.
+(`components/evaluation/EvaluationProgress.tsx`): tres filas fijas en inglés
+("Good Teacher analysing…", "Bad Teacher challenging…", "Judge deliberating…"),
+`aria-live="polite"` en la lista de etapas, y un botón Cancel que aborta el stream
+y vuelve a `idle`. Mientras Good Teacher o Bad Teacher están activos se muestra un
+`TranscriptPanel` con scroll automático: el canal `thought` (en itálica y color tenue)
+y el canal `text` (en soft) se actualizan en vivo con los deltas del frame `reasoning`.
+El feedback del Juez se pinta con `CitationList` (`components/evaluation/CitationList.tsx`),
+que distingue **tres estados**:
+- Citas verificadas: "Verified · … · p. N".
+- Citas no verificadas: "Not verified against the PDF".
+- `grounded: false` (artifact sin fuente): aviso "Advisory evaluation: no citation could
+  be verified, so the automatic mark stands." con una nota de que el panel juzgó contra
+  la respuesta esperada sin evidencia PDF.
+Multiple-choice y true-false no cambian: no pasan por `review`.
 
 El flujo de resolver un ejercicio está en `ArtifactWorkspace.tsx`: respuestas
 en estado local, `submit` vía el streaming (con fallback a `submitArtifactAttemptAction`
@@ -398,7 +427,7 @@ Hay **dos niveles**, y sólo el segundo cuesta dinero.
 `vitest ^5.0.0` es devDependency de `packages/server` y de `packages/web`, cada uno con su
 `vitest.config.ts` (`environment: "node"`, `include: ["src/**/*.test.ts"]`) y sus scripts
 `test` / `test:watch`. Desde la raíz: `pnpm run test` (alias de `pnpm -r test`). Hoy son
-**17 ficheros y 151 tests**, todos deterministas y sin ninguna llamada de red.
+**21 ficheros y 190 tests** (16 server + 5 web), todos deterministas y sin ninguna llamada de red.
 
 El modelo falso vive aquí: `domain/evaluation/__tests__/engine.test.ts:16-51`
 (`makeFakeLanguageModel`, con `generateText`, `generateObject`, `streamText` y fallos
