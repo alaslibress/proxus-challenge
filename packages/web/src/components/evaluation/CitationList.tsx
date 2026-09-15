@@ -1,5 +1,5 @@
 import type { PdfCitation, ShortAnswerCorrection } from "@proxus/shared";
-import { Streamdown } from "streamdown";
+import { Markdown } from "../Markdown.tsx";
 
 export function ShortAnswerDetails({ correction }: { readonly correction: ShortAnswerCorrection }) {
   if (correction.review === undefined) {
@@ -12,7 +12,7 @@ export function ShortAnswerDetails({ correction }: { readonly correction: ShortA
     return (
       <div>
         <div className="prose prose-invert max-w-none">
-          <Streamdown>{review.feedback}</Streamdown>
+          <Markdown>{review.feedback}</Markdown>
         </div>
         <p className="mt-3 text-ink-mute" style={{ fontSize: 12.5, fontStyle: "italic" }}>
           Graded without PDF evidence: the panel judged your answer against the expected answer.
@@ -26,7 +26,7 @@ export function ShortAnswerDetails({ correction }: { readonly correction: ShortA
   return (
     <div>
       <div className="prose prose-invert max-w-none">
-        <Streamdown>{review.feedback}</Streamdown>
+        <Markdown>{review.feedback}</Markdown>
       </div>
       {!hasVerifiedCitation && (
         <p className="mt-3 text-ink-mute" style={{ fontSize: 12.5, fontStyle: "italic" }}>

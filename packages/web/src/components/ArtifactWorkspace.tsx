@@ -9,7 +9,7 @@ import type {
   TestQuestion
 } from "@proxus/shared";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Streamdown } from "streamdown";
+import { Markdown } from "./Markdown.tsx";
 import * as AsyncResult from "effect/unstable/reactivity/AsyncResult";
 import { artifactQuery, artifactsQuery, submitArtifactAttemptAction } from "../domain/artifacts/atoms.ts";
 import { streamAttemptSubmission } from "../domain/artifacts/attempt-stream.ts";
@@ -156,7 +156,7 @@ function NoteViewer({ artifact }: { readonly artifact: Extract<Artifact, { reado
         {artifact.title}
       </h2>
       <div className="prose prose-invert max-w-none">
-        <Streamdown>{artifact.markdown}</Streamdown>
+        <Markdown>{artifact.markdown}</Markdown>
       </div>
     </article>
   );
@@ -408,10 +408,13 @@ function QuestionCard({
           </span>
           <h3
             className="text-ink"
-            style={{ fontSize: 19, fontWeight: 500, lineHeight: 1.45, maxWidth: "46ch", textWrap: "pretty" } as React.CSSProperties}
+            style={{ fontSize: 19, fontWeight: 500, lineHeight: 1.45 }}
           >
-            {index + 1}. {question.prompt}
+            {index + 1}.
           </h3>
+          <div className="mt-1 text-ink" style={{ fontSize: 19, fontWeight: 500, lineHeight: 1.45, maxWidth: "46ch" } as React.CSSProperties}>
+            <Markdown>{question.prompt}</Markdown>
+          </div>
         </div>
         {correction !== undefined && <CorrectionBadge correction={correction} />}
       </div>
@@ -483,7 +486,7 @@ function MultipleChoiceInput({
               disabled={disabled}
               onChange={() => onChange(option.id)}
             />
-            <span className="text-ink" style={{ fontSize: 13.5 }}>{option.text}</span>
+            <span className="text-ink" style={{ fontSize: 13.5 }}><Markdown>{option.text}</Markdown></span>
           </label>
         );
       })}
@@ -588,13 +591,13 @@ function CorrectionDetails({
       {correction.questionType === "multiple-choice" && question.type === "multiple-choice" && (
         <>
           <p className="text-ink-soft">Correct answer: <strong>{optionText(question, correction.correctOptionId)}</strong></p>
-          <p className="mt-2 text-ink-mute">{correction.explanation}</p>
+          <div className="mt-2 text-ink-mute"><Markdown>{correction.explanation}</Markdown></div>
         </>
       )}
       {correction.questionType === "true-false" && (
         <>
           <p className="text-ink-soft">Correct answer: <strong>{correction.correctAnswer ? "True" : "False"}</strong></p>
-          <p className="mt-2 text-ink-mute">{correction.explanation}</p>
+          <div className="mt-2 text-ink-mute"><Markdown>{correction.explanation}</Markdown></div>
         </>
       )}
       {correction.questionType === "short-answer" && (
