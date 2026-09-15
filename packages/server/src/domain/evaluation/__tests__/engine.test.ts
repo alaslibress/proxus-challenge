@@ -196,7 +196,7 @@ describe("EvaluationEngineService.evaluate", () => {
       Effect.gen(function* () {
         const engine = yield* EvaluationEngineService;
         return yield* engine.evaluate(baseInput, (event) => Effect.sync(() => { receivedEvents.push(event); }));
-      }).pipe(Effect.provide(EvaluationEngineServiceLive), Effect.provide(model))
+      }).pipe(Effect.provide(Layer.mergeAll(EvaluationEngineServiceLive, model)))
     );
 
     const textDeltas = receivedEvents.filter(

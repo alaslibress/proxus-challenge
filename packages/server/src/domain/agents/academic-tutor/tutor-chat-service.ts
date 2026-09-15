@@ -48,8 +48,7 @@ export const TutorChatServiceLive = Layer.effect(
       const attempt = ref?.attemptId === undefined || artifact === undefined
         ? undefined
         : yield* artifactRepository.getAttempt(ref.attemptId).pipe(
-            Effect.orElseSucceed(() => undefined)
-          ).pipe(
+            Effect.orElseSucceed(() => undefined),
             // Discard the attempt if it does not belong to the artifact.
             Effect.map((a) => (a !== undefined && a.artifactId === artifact.id ? a : undefined))
           );

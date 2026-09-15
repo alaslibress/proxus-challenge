@@ -75,6 +75,16 @@ const toAiError = (method: GeminiMethod, description: string) =>
     reason: new AiError.UnknownError({ description })
   });
 
+/** Un `data:` de SSE que no es JSON válido se ignora (keep-alives, tramos parciales).
+ *  Vive fuera del generador para no meter `try/catch` dentro de un `Effect.gen`. */
+const parseJsonOrUndefined = (payload: string): unknown => {
+  try {
+    return JSON.parse(payload) as unknown;
+  } catch {
+    return undefined;
+  }
+};
+
 type GeminiContentPart =
   | { readonly text: string }
   | { readonly inlineData: { readonly mimeType: string; readonly data: string } }
@@ -533,7 +543,7 @@ export const GeminiLanguageModelLive = Layer.effect(
 
               const reader = response.body?.getReader();
               if (reader === undefined) {
-                return yield* Effect.fail(toAiError("streamText", "No response body"));
+                return yield* toAiError("streamText", "No response body");
               }
 
               const decoder = new TextDecoder();
@@ -558,8 +568,8 @@ export const GeminiLanguageModelLive = Layer.effect(
 
                   for (const payload of events) {
                     if (payload === "[DONE]") continue;
-                    let json: unknown;
-                    try { json = JSON.parse(payload); } catch { continue; }
+                    const json = parseJsonOrUndefined(payload);
+                    if (json === undefined) continue;
 
                     const decoded = Schema.decodeUnknownSync(GeminiResponse)(json);
                     const candidate = decoded.candidates?.[0];

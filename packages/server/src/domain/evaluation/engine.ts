@@ -2,7 +2,7 @@ import { Context, Effect, Layer, Stream } from "effect";
 import { LanguageModel } from "effect/unstable/ai";
 import { FinalFeedbackSchema, type AttemptEvaluationStage, type EnrichedFeedbackSchema, type PanelAgent, type PanelAgentOutcome } from "@proxus/shared";
 import { verifyCitations } from "../materials/citation.ts";
-import { EvaluationUnavailable, type EvaluationError } from "./errors.ts";
+import { EvaluationUnavailable, TeacherStreamEmpty, type EvaluationError } from "./errors.ts";
 import type { EvaluationTraceDraft } from "./trace.ts";
 import {
   goodTeacherPrompt,
@@ -77,7 +77,7 @@ const runTeacher = (
       })
     );
     if (text.trim().length === 0) {
-      return yield* Effect.fail(new Error("Teacher stream produced no text"));
+      return yield* new TeacherStreamEmpty({ message: "Teacher stream produced no text" });
     }
     return { text };
   }).pipe(Effect.timeout(TEACHER_TIMEOUT_MS));
