@@ -28,7 +28,7 @@ const makeFakeLanguageModel = (options: {
     generateText: ((params: { readonly prompt: readonly { readonly role: string; readonly content: string }[] }) => {
       const systemPrompt = params.prompt[0]?.content ?? "";
       options.onGenerateText?.(systemPrompt);
-      const isGood = systemPrompt.includes("Profe Bueno");
+      const isGood = systemPrompt.includes("Good Teacher");
       if (isGood && options.failGood === true) {
         return Effect.fail(new FakeModelError({ reason: "good teacher failed" }));
       }
@@ -67,6 +67,7 @@ const baseInput: EvaluationInput = {
   questionPrompt: "¿Qué es la fotosíntesis?",
   expectedAnswer: "El proceso por el cual las plantas convierten luz en energía.",
   studentAnswer: "Las plantas usan la luz para producir energía.",
+  mode: "grounded",
   materialId: "mat-1",
   pages: [1],
   evidence: [{ page: 1, text: "La fotosíntesis es el proceso por el cual las plantas convierten luz solar en energía química." }]
@@ -126,8 +127,8 @@ describe("EvaluationEngineService.evaluate", () => {
     const result = await Effect.runPromise(runEvaluate(baseInput, model));
 
     // Both teachers were attempted (good failed, bad succeeded) and the judge still ran.
-    expect(seenSystemPrompts.some((prompt) => prompt.includes("Profe Bueno"))).toBe(true);
-    expect(seenSystemPrompts.some((prompt) => prompt.includes("Profe Malo"))).toBe(true);
+    expect(seenSystemPrompts.some((prompt) => prompt.includes("Good Teacher"))).toBe(true);
+    expect(seenSystemPrompts.some((prompt) => prompt.includes("Bad Teacher"))).toBe(true);
     expect(result.feedback.is_correct).toBe(false);
     expect(result.feedback.feedback).toBe("Falta precisión.");
   });
@@ -180,5 +181,29 @@ describe("EvaluationEngineService.evaluate", () => {
     const result = await Effect.runPromise(runEvaluate(baseInput, model));
 
     expect(result.feedback.citas_pdf).toEqual([]);
+  });
+
+  it("in ungrounded mode: does not call verifyCitations, returns citas_pdf: [] and grounded: false", async () => {
+    const model = makeFakeLanguageModel({
+      judgeValue: {
+        is_correct: true,
+        feedback: "Conceptually correct.",
+        citas_pdf: ["this quote should be ignored"]
+      }
+    });
+
+    const ungroundedInput: EvaluationInput = {
+      ...baseInput,
+      mode: "ungrounded",
+      materialId: undefined,
+      pages: [],
+      evidence: []
+    };
+
+    const result = await Effect.runPromise(runEvaluate(ungroundedInput, model));
+
+    expect(result.feedback.grounded).toBe(false);
+    expect(result.feedback.citas_pdf).toEqual([]);
+    expect(result.feedback.is_correct).toBe(true);
   });
 });

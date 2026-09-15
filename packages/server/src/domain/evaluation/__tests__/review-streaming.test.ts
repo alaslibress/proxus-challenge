@@ -78,6 +78,7 @@ const makeFakeEngine = (
         }
 
         const traceBase = {
+          mode: input.mode,
           questionId: input.questionId,
           questionPrompt: input.questionPrompt,
           expectedAnswer: input.expectedAnswer,
@@ -116,7 +117,8 @@ const makeFakeEngine = (
           feedback: {
             is_correct: behavior.is_correct,
             feedback: "Feedback consolidado del panel.",
-            citas_pdf
+            citas_pdf,
+            grounded: input.mode === "grounded"
           },
           trace: {
             ...traceBase,
@@ -324,5 +326,32 @@ describe("reviewGradedAttemptStreaming", () => {
     expect(payload.corrections[0]).toEqual(multipleChoiceCorrection);
     // El intento de entrada no se ha mutado.
     expect(gradedAttempt.corrections[1]).toEqual(shortAnswerCorrection("q1"));
+  });
+
+  it("emits the three stages for a short-answer in an artifact WITHOUT source (ungrounded mode)", async () => {
+    const artifactWithoutSource: TestArtifact = { ...testArtifact, source: undefined };
+    const singleShortAnswer: GradedTestAttempt = {
+      ...gradedAttempt,
+      corrections: [shortAnswerCorrection("q1")],
+      answers: [{ questionType: "short-answer", questionId: "q1", answer: "Las plantas usan la luz para producir energía." }]
+    };
+
+    const events = await collect(
+      artifactWithoutSource,
+      singleShortAnswer,
+      Layer.mergeAll(
+        fakeTrace,
+        makeFakeEngine({ kind: "succeed", is_correct: true, quote: "no importa" }),
+        makeFakeMaterialRepository({}),
+        noLanguageModelNeeded
+      )
+    );
+
+    const stages = events
+      .filter((e) => e.type === "status")
+      .map((e) => (e as Extract<AttemptStreamEvent, { type: "status" }>).value);
+
+    expect(stages).toEqual(["evaluating_good", "evaluating_bad", "deliberating"]);
+    expect(events.at(-1)?.type).toBe("done");
   });
 });

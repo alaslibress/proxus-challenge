@@ -8,6 +8,7 @@ const TIMESTAMP = "2026-09-08T10:00:00.000Z";
 const baseEntry: EvaluationTraceEntry = {
   attemptId: "attempt-1",
   artifactId: "artifact-1",
+  mode: "grounded",
   questionId: "q1",
   questionPrompt: "¿Qué es la fotosíntesis?",
   expectedAnswer: "El proceso por el que las plantas producen energía a partir de la luz.",
@@ -57,8 +58,8 @@ describe("formatTraceEntry — profes y juez caídos", () => {
       TIMESTAMP
     );
 
-    expect(output).toContain("### Profe Bueno\n_No disponible: timeout del modelo_");
-    expect(output).toContain("### Profe Malo\nFalta precisión.");
+    expect(output).toContain("### Good Teacher\n_No disponible: timeout del modelo_");
+    expect(output).toContain("### Bad Teacher\nFalta precisión.");
   });
 
   it("renders a fallen judge without the is_correct / feedback lines", () => {
@@ -232,5 +233,19 @@ describe("formatTraceHeader", () => {
     expect(output).toContain("- **attemptId:** attempt-1");
     expect(output).toContain("- **artifactId:** artifact-1");
     expect(output).toContain(`- **Fecha:** ${TIMESTAMP}`);
+  });
+});
+
+describe("formatTraceEntry — evidence mode line", () => {
+  it("prints 'Evidence: PDF page text' for grounded mode", () => {
+    const output = formatTraceEntry(entry({ mode: "grounded" }), TIMESTAMP);
+    expect(output).toContain("- **Evidence: PDF page text**");
+    expect(output).not.toContain("none (conceptual grading)");
+  });
+
+  it("prints 'Evidence: none (conceptual grading)' for ungrounded mode", () => {
+    const output = formatTraceEntry(entry({ mode: "ungrounded" }), TIMESTAMP);
+    expect(output).toContain("- **Evidence: none (conceptual grading)**");
+    expect(output).not.toContain("Evidence: PDF page text");
   });
 });

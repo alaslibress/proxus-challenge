@@ -61,6 +61,10 @@ const formatCitationsTable = (entry: EvaluationTraceEntry): string => {
 export const formatTraceEntry = (entry: EvaluationTraceEntry, timestamp: string): string => {
   const durationSeconds = (entry.durationMs / 1000).toFixed(1);
 
+  const evidenceLine = entry.mode === "grounded"
+    ? "- **Evidence: PDF page text**"
+    : "- **Evidence: none (conceptual grading)**";
+
   return `## Pregunta \`${entry.questionId}\` — ${timestamp} — ${durationSeconds}s
 
 **Enunciado:** ${entry.questionPrompt}
@@ -69,9 +73,9 @@ export const formatTraceEntry = (entry: EvaluationTraceEntry, timestamp: string)
 
 ${formatEvidence(entry)}
 
-${formatTeacher("Profe Bueno", entry.goodTeacher)}
+${formatTeacher("Good Teacher", entry.goodTeacher)}
 
-${formatTeacher("Profe Malo", entry.badTeacher)}
+${formatTeacher("Bad Teacher", entry.badTeacher)}
 
 ${formatJudge(entry.judge)}
 
@@ -85,6 +89,7 @@ ${formatCitationsTable(entry)}
       ? ` (${entry.citations.filter((citation) => citation.verified).length} cita${entry.citations.filter((citation) => citation.verified).length === 1 ? "" : "s"} verificada${entry.citations.filter((citation) => citation.verified).length === 1 ? "" : "s"})`
       : ""
   }
+${evidenceLine}
 `;
 };
 

@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { Effect, Schema } from "effect";
-import { CreateArtifactInput, ShortAnswerQuestion } from "@proxus/shared";
+import { CreateArtifactInput, ShortAnswerCorrection, ShortAnswerQuestion } from "@proxus/shared";
 
 const decode = <A, I>(schema: Schema.Codec<A, I>, input: unknown) =>
   Effect.runSync(
@@ -116,5 +116,28 @@ describe("CreateArtifactInput", () => {
     });
 
     expect(result.ok).toBe(true);
+  });
+});
+
+describe("ShortAnswerCorrection.review.grounded", () => {
+  it("defaults grounded to true when the key is absent (backwards-compat with pre-PR-14 attempts)", () => {
+    const result = decode(ShortAnswerCorrection, {
+      questionType: "short-answer",
+      questionId: "q1",
+      score: 5,
+      maxScore: 10,
+      feedback: "Correcto.",
+      review: {
+        is_correct: true,
+        feedback: "Bien.",
+        citas_pdf: []
+        // grounded is absent — old attempt written before PR-14
+      }
+    });
+
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.value.review?.grounded).toBe(true);
+    }
   });
 });

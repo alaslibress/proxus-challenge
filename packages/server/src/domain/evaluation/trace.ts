@@ -1,10 +1,12 @@
 import { Context, Effect } from "effect";
 import type { FinalFeedbackSchema, PdfCitation } from "@proxus/shared";
 import type { PageText } from "../materials/material.ts";
+import type { EvaluationMode } from "./prompts.ts";
 
 export interface EvaluationTraceEntry {
   readonly attemptId: string;
   readonly artifactId: string;
+  readonly mode: EvaluationMode;
   readonly questionId: string;
   readonly questionPrompt: string;
   readonly expectedAnswer: string;

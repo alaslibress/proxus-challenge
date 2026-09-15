@@ -13,7 +13,8 @@ import type {
 import type { PageText } from "../materials/material.ts";
 import { MaterialRepository } from "../materials/material.ts";
 import { EvaluationEngineService } from "./engine.ts";
-import { EvaluationTrace, type EvaluationTraceEntry } from "./trace.ts";
+import { EvaluationTrace } from "./trace.ts";
+import type { EvaluationMode } from "./prompts.ts";
 
 const findTestQuestion = (
   artifact: Artifact,
@@ -33,46 +34,64 @@ const evidenceForQuestion = (
   return source.pages;
 };
 
-// Cuando el panel nunca llega a llamarse por falta de evidencia, se registra igual: un
-// log que solo cuenta los éxitos no sirve para auditar (plan PR-06, paso 5).
-const noEvidenceTraceEntry = (params: {
-  readonly attemptId: string;
-  readonly artifactId: string;
-  readonly questionId: string;
-  readonly questionPrompt: string;
-  readonly expectedAnswer: string;
-  readonly studentAnswer: string;
+interface ResolvedEvidence {
+  readonly mode: EvaluationMode;
   readonly materialId: string | undefined;
   readonly pages: readonly number[];
-  readonly score: number;
-  readonly reason: string;
-}): EvaluationTraceEntry => ({
-  attemptId: params.attemptId,
-  artifactId: params.artifactId,
-  questionId: params.questionId,
-  questionPrompt: params.questionPrompt,
-  expectedAnswer: params.expectedAnswer,
-  studentAnswer: params.studentAnswer,
-  materialId: params.materialId,
-  pages: params.pages,
-  evidence: [],
-  goodTeacher: { ok: false, reason: params.reason },
-  badTeacher: { ok: false, reason: params.reason },
-  judge: { failed: params.reason },
-  citations: [],
-  deterministicScore: params.score,
-  finalScore: params.score,
-  scoreOverridden: false,
-  durationMs: 0
+  readonly evidence: readonly PageText[];
+}
+
+const ungrounded = (materialId?: string): ResolvedEvidence => ({
+  mode: "ungrounded",
+  materialId,
+  pages: [],
+  evidence: []
 });
 
-/** La única regla que puede subir una nota: el Juez la da por correcta Y al menos una de
- * sus citas quedó verificada contra el texto real del PDF. Vive aquí y se exporta para que
- * el script de demo (`panel.check.ts`) informe exactamente lo mismo que aplica el motor. */
+/** La única regla que puede subir una nota: el Juez la da por correcta Y, en modo grounded,
+ * al menos una de sus citas quedó verificada contra el texto real del PDF. En modo
+ * ungrounded basta con que el Juez diga que es correcta. */
 export const panelRaisesScore = (review: EnrichedFeedbackSchema | undefined): boolean =>
   review !== undefined
     && review.is_correct
-    && review.citas_pdf.some((citation) => citation.verified);
+    && (review.grounded
+      ? review.citas_pdf.some((citation) => citation.verified)
+      : true);
+
+const resolveEvidence = (
+  artifact: Artifact,
+  question: TestQuestion
+): Effect.Effect<ResolvedEvidence, never, MaterialRepository> =>
+  Effect.gen(function* () {
+    if (artifact.source === undefined) {
+      return ungrounded();
+    }
+
+    const materialId = artifact.source.materialId;
+    const pages = evidenceForQuestion(artifact.source, question);
+    if (pages.length === 0) {
+      return ungrounded(materialId);
+    }
+
+    const materialRepository = yield* MaterialRepository;
+    const pageTexts: readonly PageText[] | undefined = yield* materialRepository
+      .extractText(materialId, pages)
+      .pipe(
+        Effect.map((result) => result.pages),
+        Effect.orElseSucceed(() => undefined)
+      );
+
+    if (pageTexts === undefined) {
+      return ungrounded(materialId);
+    }
+
+    const nonEmptyPages = pageTexts.filter((page) => page.text.trim().length > 0);
+    if (nonEmptyPages.length === 0) {
+      return ungrounded(materialId);
+    }
+
+    return { mode: "grounded", materialId, pages, evidence: nonEmptyPages };
+  });
 
 const reviewCorrection = (
   artifact: Artifact,
@@ -90,69 +109,19 @@ const reviewCorrection = (
     return correction;
   }
 
-  if (artifact.source === undefined) {
-    return correction;
-  }
-
-  const materialId = artifact.source.materialId;
-  const pages = evidenceForQuestion(artifact.source, question);
-  if (pages.length === 0) {
-    return correction;
-  }
-
-  const trace = yield* EvaluationTrace;
-  const materialRepository = yield* MaterialRepository;
-
-  const pageTexts: readonly PageText[] | undefined = yield* materialRepository
-    .extractText(materialId, pages)
-    .pipe(
-      Effect.map((result) => result.pages),
-      Effect.orElseSucceed(() => undefined)
-    );
-
-  if (pageTexts === undefined) {
-    yield* trace.record(noEvidenceTraceEntry({
-      attemptId,
-      artifactId: artifact.id,
-      questionId: correction.questionId,
-      questionPrompt: question.prompt,
-      expectedAnswer: question.expectedAnswer,
-      studentAnswer,
-      materialId,
-      pages,
-      score: correction.score,
-      reason: "No se pudo extraer el texto del material."
-    }));
-    return correction;
-  }
-
-  const nonEmptyPages = pageTexts.filter((page) => page.text.trim().length > 0);
-  if (nonEmptyPages.length === 0) {
-    yield* trace.record(noEvidenceTraceEntry({
-      attemptId,
-      artifactId: artifact.id,
-      questionId: correction.questionId,
-      questionPrompt: question.prompt,
-      expectedAnswer: question.expectedAnswer,
-      studentAnswer,
-      materialId,
-      pages,
-      score: correction.score,
-      reason: "El texto extraído de las páginas estaba vacío (sin capa de texto)."
-    }));
-    return correction;
-  }
-
+  const resolved = yield* resolveEvidence(artifact, question);
   const engine = yield* EvaluationEngineService;
+  const trace = yield* EvaluationTrace;
 
   const outcome = yield* engine.evaluate({
     questionId: correction.questionId,
     questionPrompt: question.prompt,
     expectedAnswer: question.expectedAnswer,
     studentAnswer,
-    materialId,
-    pages,
-    evidence: nonEmptyPages
+    mode: resolved.mode,
+    materialId: resolved.materialId,
+    pages: resolved.pages,
+    evidence: resolved.evidence
   }, emit).pipe(
     Effect.match({
       onFailure: (error) => ({ review: undefined, trace: error.trace }),

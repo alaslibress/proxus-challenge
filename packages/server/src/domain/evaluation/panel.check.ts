@@ -12,36 +12,57 @@ import { panelRaisesScore } from "./review.ts";
 import {
   goodTeacherPrompt,
   badTeacherPrompt,
-  GOOD_TEACHER_SYSTEM_PROMPT,
-  BAD_TEACHER_SYSTEM_PROMPT
+  goodTeacherSystemPrompt,
+  badTeacherSystemPrompt,
+  type EvaluationMode
 } from "./prompts.ts";
 
-const [studentAnswer, expectedAnswer, materialId, pageArg] = process.argv.slice(2);
+const args = process.argv.slice(2);
+const [studentAnswer, expectedAnswer, materialIdArg, pageArg, modeArg] = args;
 
 const program = Effect.gen(function* () {
-  if (studentAnswer === undefined || expectedAnswer === undefined || materialId === undefined || pageArg === undefined) {
+  if (studentAnswer === undefined || expectedAnswer === undefined) {
     yield* Console.error(
-      "Usage: panel.check.ts <studentAnswer> <expectedAnswer> <materialId> <page>"
+      "Usage: panel.check.ts <studentAnswer> <expectedAnswer> <materialId> <page> [grounded|ungrounded]"
     );
     return yield* Effect.fail("missing arguments" as const);
   }
 
-  const page = Number(pageArg);
-  const materialRepository = yield* MaterialRepository;
+  const mode: EvaluationMode =
+    modeArg === "ungrounded" ? "ungrounded" : "grounded";
+
   const engine = yield* EvaluationEngineService;
   const trace = yield* EvaluationTrace;
 
-  const { pages } = yield* materialRepository.extractText(materialId, [page]);
+  let input;
 
-  const input = {
-    questionId: "panel-check",
-    questionPrompt: "(panel:check) Evalúa la respuesta corta del alumno.",
-    expectedAnswer,
-    studentAnswer,
-    materialId,
-    pages: [page],
-    evidence: pages
-  };
+  if (mode === "ungrounded" || materialIdArg === undefined || materialIdArg === "-") {
+    input = {
+      questionId: "panel-check",
+      questionPrompt: "(panel:check) Evalúa la respuesta corta del alumno.",
+      expectedAnswer,
+      studentAnswer,
+      mode: "ungrounded" as EvaluationMode,
+      materialId: undefined,
+      pages: [] as number[],
+      evidence: [] as { page: number; text: string }[]
+    };
+  } else {
+    const materialRepository = yield* MaterialRepository;
+    const page = Number(pageArg);
+    const { pages } = yield* materialRepository.extractText(materialIdArg, [page]);
+
+    input = {
+      questionId: "panel-check",
+      questionPrompt: "(panel:check) Evalúa la respuesta corta del alumno.",
+      expectedAnswer,
+      studentAnswer,
+      mode: "grounded" as EvaluationMode,
+      materialId: materialIdArg,
+      pages: [page],
+      evidence: pages
+    };
+  }
 
   // Repetimos las llamadas a los dos profes por separado (fuera del motor) solo para
   // poder imprimirlas: el motor no expone las críticas intermedias, solo el veredicto
@@ -49,24 +70,24 @@ const program = Effect.gen(function* () {
   const [good, bad] = yield* Effect.all([
     LanguageModel.generateText({
       prompt: [
-        { role: "system" as const, content: GOOD_TEACHER_SYSTEM_PROMPT },
+        { role: "system" as const, content: goodTeacherSystemPrompt(input.mode) },
         { role: "user" as const, content: goodTeacherPrompt(input) }
       ],
       toolChoice: "none" as const
     }),
     LanguageModel.generateText({
       prompt: [
-        { role: "system" as const, content: BAD_TEACHER_SYSTEM_PROMPT },
+        { role: "system" as const, content: badTeacherSystemPrompt(input.mode) },
         { role: "user" as const, content: badTeacherPrompt(input) }
       ],
       toolChoice: "none" as const
     })
   ], { concurrency: "unbounded", mode: "result" });
 
-  yield* Console.log("=== Profe Bueno ===");
+  yield* Console.log("=== Good Teacher ===");
   yield* Console.log(good._tag === "Success" ? good.success.text : `(falló) ${JSON.stringify(good)}`);
 
-  yield* Console.log("\n=== Profe Malo ===");
+  yield* Console.log("\n=== Bad Teacher ===");
   yield* Console.log(bad._tag === "Success" ? bad.success.text : `(falló) ${JSON.stringify(bad)}`);
 
   const result = yield* engine.evaluate(input);

@@ -8,9 +8,9 @@ import {
   goodTeacherPrompt,
   badTeacherPrompt,
   judgePrompt,
-  GOOD_TEACHER_SYSTEM_PROMPT,
-  BAD_TEACHER_SYSTEM_PROMPT,
-  JUDGE_SYSTEM_PROMPT,
+  goodTeacherSystemPrompt,
+  badTeacherSystemPrompt,
+  judgeSystemPrompt,
   type EvaluationInput
 } from "./prompts.ts";
 
@@ -73,8 +73,8 @@ const evaluate = (
 
     const [goodResult, badResult] = yield* Effect.all(
       [
-        runTeacher(GOOD_TEACHER_SYSTEM_PROMPT, goodTeacherPrompt(input)),
-        runTeacher(BAD_TEACHER_SYSTEM_PROMPT, badTeacherPrompt(input))
+        runTeacher(goodTeacherSystemPrompt(input.mode), goodTeacherPrompt(input)),
+        runTeacher(badTeacherSystemPrompt(input.mode), badTeacherPrompt(input))
       ],
       { concurrency: "unbounded", mode: "result" }
     );
@@ -89,6 +89,7 @@ const evaluate = (
     }
 
     const traceBase = {
+      mode: input.mode,
       questionId: input.questionId,
       questionPrompt: input.questionPrompt,
       expectedAnswer: input.expectedAnswer,
@@ -102,7 +103,7 @@ const evaluate = (
 
     const judgeOutcome = yield* LanguageModel.generateObject({
       prompt: [
-        { role: "system" as const, content: JUDGE_SYSTEM_PROMPT },
+        { role: "system" as const, content: judgeSystemPrompt(input.mode) },
         { role: "user" as const, content: judgePrompt(input, { good, bad }) }
       ],
       schema: FinalFeedbackSchema,
@@ -129,13 +130,16 @@ const evaluate = (
       });
     }
 
-    const citas_pdf = verifyCitations(judgeOutcome.value.citas_pdf, input.evidence, input.materialId);
+    const citas_pdf = input.mode === "grounded" && input.materialId !== undefined
+      ? verifyCitations(judgeOutcome.value.citas_pdf, input.evidence, input.materialId)
+      : [];
 
     return {
       feedback: {
         is_correct: judgeOutcome.value.is_correct,
         feedback: judgeOutcome.value.feedback,
-        citas_pdf
+        citas_pdf,
+        grounded: input.mode === "grounded"
       },
       trace: {
         ...traceBase,

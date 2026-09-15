@@ -1,4 +1,4 @@
-import { Schema } from "effect";
+import { Effect, Schema } from "effect";
 import { PdfCitation } from "./citation.ts";
 
 /** Contrato estricto de la respuesta del Juez. Lo que el LLM debe producir. */
@@ -13,6 +13,7 @@ export type FinalFeedbackSchema = typeof FinalFeedbackSchema.Type;
 export const EnrichedFeedbackSchema = Schema.Struct({
   is_correct: Schema.Boolean,
   feedback: Schema.String,
-  citas_pdf: Schema.Array(PdfCitation)
+  citas_pdf: Schema.Array(PdfCitation),
+  grounded: Schema.Boolean.pipe(Schema.withDecodingDefaultKey(Effect.succeed(true)))
 });
 export type EnrichedFeedbackSchema = typeof EnrichedFeedbackSchema.Type;
