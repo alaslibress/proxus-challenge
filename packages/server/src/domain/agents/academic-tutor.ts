@@ -16,7 +16,8 @@ import { AcademicTutorSkills } from "./academic-tutor/skills/index.ts";
 export const makeAcademicTutorHarness = (
   materialRepository: MaterialRepository,
   artifactRepository: ArtifactRepository,
-  materialsContext: string
+  materialsContext: string,
+  openExerciseContext: string = "No exercise is open on the student's screen."
 ) => AgentHarness.make({
   name: `You are an academic tutor agent.
 
@@ -32,6 +33,9 @@ Be precise, pedagogical, and honest about what you can infer from the available 
   to create, list, or grade an artifact.
 - The information you need is already in this conversation, including results of tool
   calls from earlier turns.
+- The question is about the exercise shown below under "Exercise open on the student's
+  screen" — its questions, the student's answers, their marks or why an answer was wrong.
+  That block is complete and current for this turn.
 
 Answering directly is the default. A tool call must earn its place.
 
@@ -47,6 +51,8 @@ Answering directly is the default. A tool call must earn its place.
 ## Hard rules
 
 - Never call \`materials list\`. The inventory below is current for this turn.
+- Never call \`artifacts list\`, \`artifacts show\`, \`artifacts attempts\` or \`artifacts grade\`
+  for the exercise already shown below. It is the same data, and it costs the student seconds.
 - Never chain a second tool call unless the first result told you something you still
   need.
 - If a tool fails, say so plainly in one line and answer with what you know.
@@ -54,7 +60,11 @@ Answering directly is the default. A tool call must earn its place.
 
 ## Uploaded materials
 
-${materialsContext}`,
+${materialsContext}
+
+## Exercise open on the student's screen
+
+${openExerciseContext}`,
   skills: AcademicTutorSkills,
   commands: [
     makeMaterialCommands(materialRepository),
