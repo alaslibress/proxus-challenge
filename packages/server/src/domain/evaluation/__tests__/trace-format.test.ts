@@ -16,8 +16,8 @@ const baseEntry: EvaluationTraceEntry = {
   materialId: "mat-1",
   pages: [1],
   evidence: [{ page: 1, text: "La fotosíntesis convierte luz solar en energía química." }],
-  goodTeacher: { ok: true, text: "Buen enfoque." },
-  badTeacher: { ok: true, text: "Falta precisión." },
+  goodTeacher: { status: "ok", text: "Buen enfoque." },
+  badTeacher: { status: "ok", text: "Falta precisión." },
   judge: { is_correct: true, feedback: "Correcta con matices.", citas_pdf: ["convierte luz solar"] },
   citations: [
     { materialId: "mat-1", page: 1, quote: "convierte luz solar", verified: true }
@@ -54,7 +54,7 @@ describe("formatTraceEntry — cabecera y datos de la pregunta", () => {
 describe("formatTraceEntry — profes y juez caídos", () => {
   it("renders a fallen teacher as _No disponible: <razón>_", () => {
     const output = formatTraceEntry(
-      entry({ goodTeacher: { ok: false, reason: "timeout del modelo" } }),
+      entry({ goodTeacher: { status: "failed", reason: "timeout del modelo" } }),
       TIMESTAMP
     );
 

@@ -78,8 +78,8 @@ const makeFakeEngine = (
         materialId: input.materialId,
         pages: input.pages,
         evidence: input.evidence,
-        goodTeacher: { ok: true as const, text: "bien" },
-        badTeacher: { ok: true as const, text: "mal" },
+        goodTeacher: { status: "ok" as const, text: "bien" },
+        badTeacher: { status: "ok" as const, text: "mal" },
         durationMs: 1
       };
 
@@ -192,7 +192,7 @@ const run = (
 ) => Effect.runPromise(reviewGradedAttempt(artifact, attempt).pipe(Effect.provide(layers)));
 
 describe("reviewGradedAttempt", () => {
-  it("never fails even if the evaluation panel fails — returns the attempt unmodified", async () => {
+  it("never fails even if the evaluation panel fails — returns corrections with panel.ran: false", async () => {
     const layers = Layer.mergeAll(
       fakeTrace,
       makeFakeEngine({ kind: "fail" }),
@@ -200,9 +200,12 @@ describe("reviewGradedAttempt", () => {
       noLanguageModelNeeded
     );
 
-    const result = await run(testArtifact, gradedAttempt, layers);
+    const result = (await run(testArtifact, gradedAttempt, layers)) as GradedTestAttempt;
+    const correction = result.corrections[0] as ShortAnswerCorrection;
 
-    expect(result).toEqual(gradedAttempt);
+    // The attempt comes back with the same score (unmodified), but carries a panel status.
+    expect(correction.score).toBe(baseCorrection.score);
+    expect(correction.panel).toEqual({ ran: false, why: "judge-unavailable" });
   });
 
   it("raises the grade when the judge's citation is a verified literal quote from the extracted text", async () => {
@@ -370,6 +373,55 @@ describe("reviewGradedAttempt", () => {
     expect(recorded?.pages).toEqual([]);
     expect(correction.score).toBe(shortAnswerQuestion.maxScore);
     expect(correction.review?.grounded).toBe(false);
+  });
+
+  it("panel status: grounded run → correction.panel = { ran: true, grounded: true }", async () => {
+    const pageText = "La fotosíntesis convierte luz solar en energía química.";
+    const layers = Layer.mergeAll(
+      fakeTrace,
+      makeFakeEngine({
+        kind: "succeed",
+        is_correct: true,
+        quote: "convierte luz solar en energía química",
+        evidenceText: pageText
+      }),
+      makeFakeMaterialRepository({ pages: [{ page: 1, text: pageText }] }),
+      noLanguageModelNeeded
+    );
+
+    const result = (await run(testArtifact, gradedAttempt, layers)) as GradedTestAttempt;
+    const correction = result.corrections[0] as ShortAnswerCorrection;
+
+    expect(correction.panel).toEqual({ ran: true, grounded: true });
+  });
+
+  it("panel status: no-source artifact → correction.panel = { ran: true, grounded: false, why: 'no-source' }", async () => {
+    const artifactWithoutSource: TestArtifact = { ...testArtifact, source: undefined };
+    const layers = Layer.mergeAll(
+      fakeTrace,
+      makeFakeEngine({ kind: "succeed-no-citations", is_correct: true }),
+      makeFakeMaterialRepository({}),
+      noLanguageModelNeeded
+    );
+
+    const result = (await run(artifactWithoutSource, gradedAttempt, layers)) as GradedTestAttempt;
+    const correction = result.corrections[0] as ShortAnswerCorrection;
+
+    expect(correction.panel).toEqual({ ran: true, grounded: false, why: "no-source" });
+  });
+
+  it("panel status: engine fails → correction.panel = { ran: false, why: 'judge-unavailable' }", async () => {
+    const layers = Layer.mergeAll(
+      fakeTrace,
+      makeFakeEngine({ kind: "fail" }),
+      makeFakeMaterialRepository({}),
+      noLanguageModelNeeded
+    );
+
+    const result = (await run(testArtifact, gradedAttempt, layers)) as GradedTestAttempt;
+    const correction = result.corrections[0] as ShortAnswerCorrection;
+
+    expect(correction.panel).toEqual({ ran: false, why: "judge-unavailable" });
   });
 });
 

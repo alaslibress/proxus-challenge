@@ -9,10 +9,10 @@ class FakeModelError extends Data.TaggedError("FakeModelError")<{ readonly reaso
 // generation is entirely under the test's control here, mirroring the fake PdfService
 // pattern used in file-material-repository.test.ts.
 const teacherStream = (text: string): Stream.Stream<Response.StreamPartEncoded> =>
-  Stream.make<Response.StreamPartEncoded>(
-    { type: "text-start" as const, id: "text" },
-    { type: "text-delta" as const, id: "text", delta: text },
-    { type: "text-end" as const, id: "text" }
+  Stream.make(
+    { type: "text-start" as const, id: "text" } as Response.StreamPartEncoded,
+    { type: "text-delta" as const, id: "text", delta: text } as Response.StreamPartEncoded,
+    { type: "text-end" as const, id: "text" } as Response.StreamPartEncoded
   );
 
 const makeFakeLanguageModel = (options: {
@@ -223,8 +223,8 @@ describe("EvaluationEngineService.evaluate", () => {
     const result = await Effect.runPromise(runEvaluate(baseInput, model));
 
     // Judge still runs (mode: result tolerates teacher failure), result has a trace
-    expect(result.trace.goodTeacher.ok).toBe(false);
-    expect(result.trace.badTeacher.ok).toBe(false);
+    expect(result.trace.goodTeacher.status).toBe("failed");
+    expect(result.trace.badTeacher.status).toBe("failed");
   });
 
   it("in ungrounded mode: does not call verifyCitations, returns citas_pdf: [] and grounded: false", async () => {
@@ -248,6 +248,37 @@ describe("EvaluationEngineService.evaluate", () => {
 
     expect(result.feedback.grounded).toBe(false);
     expect(result.feedback.citas_pdf).toEqual([]);
+    expect(result.feedback.is_correct).toBe(true);
+  });
+
+  it("with both teachers OK, feedback includes goodTeacher and badTeacher with status ok", async () => {
+    const model = makeFakeLanguageModel({
+      goodText: "Well supported.",
+      badText: "Missing nuance.",
+      judgeValue: { is_correct: true, feedback: "Correct.", citas_pdf: [] }
+    });
+
+    const result = await Effect.runPromise(runEvaluate(baseInput, model));
+
+    const goodT = result.feedback.goodTeacher;
+    const badT = result.feedback.badTeacher;
+    expect(goodT?.status).toBe("ok");
+    expect(goodT?.status === "ok" ? goodT.text : undefined).toBe("Well supported.");
+    expect(badT?.status).toBe("ok");
+    expect(badT?.status === "ok" ? badT.text : undefined).toBe("Missing nuance.");
+  });
+
+  it("with bad teacher failing, badTeacher has status failed and judge still runs", async () => {
+    const model = makeFakeLanguageModel({
+      failBad: true,
+      goodText: "solid argument",
+      judgeValue: { is_correct: true, feedback: "judge ok", citas_pdf: [] }
+    });
+
+    const result = await Effect.runPromise(runEvaluate(baseInput, model));
+
+    expect(result.feedback.goodTeacher?.status).toBe("ok");
+    expect(result.feedback.badTeacher?.status).toBe("failed");
     expect(result.feedback.is_correct).toBe(true);
   });
 });

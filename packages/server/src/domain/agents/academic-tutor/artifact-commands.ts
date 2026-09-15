@@ -49,7 +49,7 @@ const renderSerializationError = (reason: unknown) => {
     : "";
 
   const questionShapeHint = message.includes("questions")
-    ? "\n\nRequired question fields: multiple-choice -> type,id,prompt,options,correctOptionId,explanation; true-false -> type,id,prompt,correctAnswer,explanation; short-answer (tests only) -> type,id,prompt,expectedAnswer (maxScore is optional, defaults to 1). sourcePage is always optional."
+    ? "\n\nRequired question fields: multiple-choice -> type,id,prompt,options,correctOptionId,explanation; true-false -> type,id,prompt,correctAnswer,explanation; short-answer (tests only) -> type,id,prompt,expectedAnswer (maxScore is optional, defaults to 1). sourcePage narrows a question to its page. source (top-level) -> {materialId, pages}: required so the grading panel can cite the PDF; without it, sourcePage is useless."
     : "";
 
   return `Invalid artifact/attempt JSON: ${message}${multipleChoiceHint}${questionShapeHint}\n\nUse artifacts create --help or artifacts submit --help for examples.`;
@@ -153,23 +153,23 @@ export const makeArtifactCommands = (repository: ArtifactRepository) => {
 
   const create = AgentCli.Command.withExamples([
     {
-      command: `artifacts create '{"kind":"note","title":"Derivatives summary","markdown":"# Derivatives\\n..."}'`,
-      description: "Create a note artifact"
+      command: `artifacts create '{"kind":"note","title":"Derivatives summary","markdown":"# Derivatives\\n...","source":{"materialId":"mat-abc123","pages":[1,2]}}'`,
+      description: "Create a note artifact anchored to a material"
     },
     {
-      command: `artifacts create '{"kind":"quiz","title":"Basics quiz","questions":[{"type":"true-false","id":"q1","prompt":"2+2=4","correctAnswer":true,"explanation":"Basic arithmetic."}]}'`,
-      description: "Create a quiz artifact (true-false requires correctAnswer and explanation)"
+      command: `artifacts create '{"kind":"quiz","title":"Basics quiz","questions":[{"type":"true-false","id":"q1","prompt":"2+2=4","correctAnswer":true,"explanation":"Basic arithmetic.","sourcePage":3}],"source":{"materialId":"mat-abc123","pages":[3]}}'`,
+      description: "Create a quiz artifact (true-false requires correctAnswer and explanation); source anchors the quiz to one material"
     },
     {
-      command: `artifacts create '{"kind":"quiz","title":"Concept quiz","questions":[{"type":"multiple-choice","id":"q1","prompt":"Which one is qualitative?","options":[{"id":"a","text":"Colour"},{"id":"b","text":"Height"}],"correctOptionId":"a","explanation":"Colour describes a quality."}]}'`,
-      description: "Multiple-choice requires options, correctOptionId and explanation"
+      command: `artifacts create '{"kind":"quiz","title":"Concept quiz","questions":[{"type":"multiple-choice","id":"q1","prompt":"Which one is qualitative?","options":[{"id":"a","text":"Colour"},{"id":"b","text":"Height"}],"correctOptionId":"a","explanation":"Colour describes a quality.","sourcePage":5}],"source":{"materialId":"mat-abc123","pages":[5]}}'`,
+      description: "Multiple-choice requires options, correctOptionId and explanation; sourcePage narrows a question to its page within source"
     },
     {
-      command: `artifacts create '{"kind":"test","title":"Limits test","questions":[{"type":"short-answer","id":"q1","prompt":"Define a limit.","expectedAnswer":"The value a function approaches."}]}'`,
-      description: "Short-answer (tests only) requires expectedAnswer, not correctAnswer; maxScore is optional and defaults to 1"
+      command: `artifacts create '{"kind":"test","title":"Limits test","questions":[{"type":"short-answer","id":"q1","prompt":"Define a limit.","expectedAnswer":"The value a function approaches.","sourcePage":7}],"source":{"materialId":"mat-abc123","pages":[7]}}'`,
+      description: "Short-answer (tests only) requires expectedAnswer; source is required so the grading panel can read the PDF"
     }
   ])(
-    AgentCli.Command.withDescription("Create a note, quiz, or test artifact from JSON. multiple-choice: type,id,prompt,options,correctOptionId,explanation. true-false: type,id,prompt,correctAnswer,explanation. short-answer (test only): type,id,prompt,expectedAnswer (+optional maxScore). sourcePage is optional on any question.")(
+    AgentCli.Command.withDescription("Create a note, quiz, or test artifact from JSON. multiple-choice: type,id,prompt,options,correctOptionId,explanation. true-false: type,id,prompt,correctAnswer,explanation. short-answer (test only): type,id,prompt,expectedAnswer (+optional maxScore). source anchors the whole artifact to one material; sourcePage narrows a single question within it. Without source, sourcePage is useless and the evaluation panel cannot cite the PDF.")(
       AgentCli.Command.exec("create", {
         json: AgentCli.Argument.string("json").pipe(
           AgentCli.Argument.withDescription("CreateArtifactInput JSON")

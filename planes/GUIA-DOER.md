@@ -130,7 +130,8 @@ encadenan sobre la firma de `evaluate`.
 | [07](./pr-07-ui-observabilidad/plan.md) | `feat/ui-observabilidad` | Los tres agentes visibles y las citas con su badge. |
 | [08](./pr-08-evals-entrega/plan.md) | `feat/evals-entrega` | Evals sin API key y README. **No recortable.** |
 | [14](./pr-14-solucion-errores/plan.md) | `fix/solucion-errores` | Cuatro bugs de QA: panel siempre corre, tutor sabe el ejercicio abierto, agrupación radio, razonamiento en vivo. |
-| [15](./pr-15-gemini-reintentos/plan.md) | `fix/gemini-reintentos` | Reintentos con backoff exponencial y jitter ante 408/429/5xx. Errores dicen qué llamada falló. Ref. tests: 22 ficheros / 205 tests. |
+| [15](./pr-15-gemini-reintentos/plan.md) | `fix/gemini-reintentos` | Reintentos con backoff exponencial y jitter ante 408/429/5xx. Errores dicen qué llamada falló. |
+| [16](./pr-16-panel-transparente/plan.md) | `feat/panel-transparente` | Cuatro bugs de QA post-PR-14: source omitido en ejemplos, sin indicador de si corrió el panel, razonamiento perdido en streaming, prompts en inglés. Ref. tests: 25 ficheros / 222 tests. |
 
 El plan de recorte que esta sección traía —tirar el PR-06, luego el resaltado de citas del
 PR-07, luego casos del panel del PR-08— **no llegó a usarse**: entraron los tres enteros.

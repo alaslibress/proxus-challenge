@@ -239,6 +239,21 @@ nunca `Promise.all`). El panel siempre corre, incluso para artifacts sin `source
   `citas_pdf: []`. La nota sube con solo `is_correct: true`, ya que no hay citas que
   verificar. El feedback lleva `grounded: false`, que la UI muestra como aviso.
 
+**Estado del razonamiento avanzado** (`PanelStatus` en `@proxus/shared`). Desde PR-16
+cada `ShortAnswerCorrection` lleva un campo `panel?: PanelStatus` que refleja por qué el
+panel pudo o no anclarse al PDF:
+- `{ ran: true, grounded: true }` — panel corrió con evidencia real del PDF.
+- `{ ran: true, grounded: false, why }` — panel corrió sin evidencia. `why` ∈
+  `"no-source"` (artifact sin `source`), `"no-pages"` (sin páginas vinculadas),
+  `"extract-failed"` (fallo al leer el PDF), `"empty-pages"` (páginas sin texto
+  extraíble).
+- `{ ran: false, why: "judge-unavailable" }` — el motor falló (timeout, cuota, JSON
+  inválido); la corrección determinista se conserva intacta.
+
+La UI muestra un `PanelIndicator` con icono y etiqueta encima del feedback del Juez, y
+un botón "See the panel debate" que abre un modal `PanelDebateModal` con el texto de cada
+profe (o su motivo de fallo) y las citas del Juez.
+
 `reviewGradedAttempt` (`domain/evaluation/review.ts`) nunca falla: cualquier error del
 panel se traga y el attempt determinista queda intacto. Multiple-choice y true-false no
 pasan por el panel: siguen siendo 100% deterministas y sin latencia añadida.
@@ -436,7 +451,7 @@ Hay **dos niveles**, y sólo el segundo cuesta dinero.
 `vitest ^5.0.0` es devDependency de `packages/server` y de `packages/web`, cada uno con su
 `vitest.config.ts` (`environment: "node"`, `include: ["src/**/*.test.ts"]`) y sus scripts
 `test` / `test:watch`. Desde la raíz: `pnpm run test` (alias de `pnpm -r test`). Hoy son
-**21 ficheros y 190 tests** (16 server + 5 web), todos deterministas y sin ninguna llamada de red.
+**25 ficheros y 222 tests** (19 server + 6 web), todos deterministas y sin ninguna llamada de red.
 
 El modelo falso vive aquí: `domain/evaluation/__tests__/engine.test.ts:16-51`
 (`makeFakeLanguageModel`, con `generateText`, `generateObject`, `streamText` y fallos

@@ -28,7 +28,7 @@ const formatEvidence = (entry: EvaluationTraceEntry): string => {
 };
 
 const formatTeacher = (title: string, teacher: EvaluationTraceEntry["goodTeacher"]): string =>
-  teacher.ok
+  teacher.status === "ok"
     ? `### ${title}\n${teacher.text}`
     : `### ${title}\n_No disponible: ${teacher.reason}_`;
 
@@ -63,7 +63,7 @@ export const formatTraceEntry = (entry: EvaluationTraceEntry, timestamp: string)
 
   const evidenceLine = entry.mode === "grounded"
     ? "- **Evidence: PDF page text**"
-    : "- **Evidence: none (conceptual grading)**";
+    : `- **Evidence: none (conceptual grading)${entry.ungroundedWhy !== undefined ? ` — why: ${entry.ungroundedWhy}` : ""}**`;
 
   return `## Pregunta \`${entry.questionId}\` — ${timestamp} — ${durationSeconds}s
 

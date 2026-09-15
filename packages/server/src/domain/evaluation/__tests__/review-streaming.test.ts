@@ -86,8 +86,8 @@ const makeFakeEngine = (
           materialId: input.materialId,
           pages: input.pages,
           evidence: input.evidence,
-          goodTeacher: { ok: true as const, text: "bien" },
-          badTeacher: { ok: true as const, text: "mal" },
+          goodTeacher: { status: "ok" as const, text: "bien" },
+          badTeacher: { status: "ok" as const, text: "mal" },
           durationMs: 1
         };
 
@@ -350,8 +350,8 @@ describe("reviewGradedAttemptStreaming", () => {
               materialId: undefined,
               pages: [],
               evidence: [],
-              goodTeacher: { ok: true as const, text: "good" },
-              badTeacher: { ok: true as const, text: "bad" },
+              goodTeacher: { status: "ok" as const, text: "good" },
+              badTeacher: { status: "ok" as const, text: "bad" },
               judge: { is_correct: true, feedback: "ok", citas_pdf: [] },
               citations: [],
               durationMs: 1

@@ -2,6 +2,36 @@ import { Effect, Schema } from "effect";
 import { ArtifactSource } from "./citation.ts";
 import { EnrichedFeedbackSchema } from "./evaluation.ts";
 
+/**
+ * Por qué NO se pudo anclar al PDF. Se propaga desde resolveEvidence.
+ */
+export const UngroundedReason = Schema.Union([
+  Schema.Literal("no-source"),
+  Schema.Literal("no-pages"),
+  Schema.Literal("extract-failed"),
+  Schema.Literal("empty-pages")
+]);
+export type UngroundedReason = typeof UngroundedReason.Type;
+
+/** Estado del razonamiento avanzado, tal y como lo verá el alumno. */
+export const PanelStatus = Schema.Union([
+  Schema.Struct({
+    ran: Schema.Literal(true),
+    grounded: Schema.Literal(true)
+  }),
+  Schema.Struct({
+    ran: Schema.Literal(true),
+    grounded: Schema.Literal(false),
+    why: UngroundedReason
+  }),
+  Schema.Struct({
+    ran: Schema.Literal(false),
+    // "judge-unavailable" cubre timeout, cuota agotada y JSON inválido.
+    why: Schema.Literal("judge-unavailable")
+  })
+]);
+export type PanelStatus = typeof PanelStatus.Type;
+
 export const QuestionOption = Schema.Struct({
   id: Schema.String,
   text: Schema.String
@@ -196,7 +226,9 @@ export const ShortAnswerCorrection = Schema.Struct({
   score: Schema.Number,
   maxScore: Schema.Number,
   feedback: Schema.String,
-  review: Schema.optional(EnrichedFeedbackSchema)
+  review: Schema.optional(EnrichedFeedbackSchema),
+  // Opcional por retrocompatibilidad: intentos anteriores a PR-16 no lo llevan.
+  panel: Schema.optional(PanelStatus)
 });
 export type ShortAnswerCorrection = typeof ShortAnswerCorrection.Type;
 

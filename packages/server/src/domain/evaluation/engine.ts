@@ -1,6 +1,6 @@
 import { Context, Effect, Layer, Stream } from "effect";
 import { LanguageModel } from "effect/unstable/ai";
-import { FinalFeedbackSchema, type AttemptEvaluationStage, type EnrichedFeedbackSchema, type PanelAgent } from "@proxus/shared";
+import { FinalFeedbackSchema, type AttemptEvaluationStage, type EnrichedFeedbackSchema, type PanelAgent, type PanelAgentOutcome } from "@proxus/shared";
 import { verifyCitations } from "../materials/citation.ts";
 import { EvaluationUnavailable, type EvaluationError } from "./errors.ts";
 import type { EvaluationTraceDraft } from "./trace.ts";
@@ -86,12 +86,16 @@ type TeacherResult =
   | { readonly _tag: "Success"; readonly success: { readonly text: string } }
   | { readonly _tag: "Failure"; readonly failure: unknown };
 
-const teacherOutcome = (
-  result: TeacherResult
-): { readonly ok: true; readonly text: string } | { readonly ok: false; readonly reason: string } =>
+const describeFailure = (result: TeacherResult & { _tag: "Failure" }): string => {
+  const s = String(result.failure);
+  if (s.includes("TimeoutException") || s.includes("timeout")) return `Timeout after ${TEACHER_TIMEOUT_MS / 1000}s`;
+  return s;
+};
+
+const teacherOutcome = (result: TeacherResult): PanelAgentOutcome =>
   result._tag === "Success"
-    ? { ok: true, text: result.success.text }
-    : { ok: false, reason: String(result.failure) };
+    ? { status: "ok", text: result.success.text }
+    : { status: "failed", reason: describeFailure(result) };
 
 const evaluate = (
   input: EvaluationInput,
@@ -173,7 +177,9 @@ const evaluate = (
         is_correct: judgeOutcome.value.is_correct,
         feedback: judgeOutcome.value.feedback,
         citas_pdf,
-        grounded: input.mode === "grounded"
+        grounded: input.mode === "grounded",
+        goodTeacher,
+        badTeacher
       },
       trace: {
         ...traceBase,

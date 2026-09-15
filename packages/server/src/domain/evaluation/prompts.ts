@@ -20,6 +20,11 @@ const evidenceBlock = (evidence: readonly PageText[]): string =>
 
 const mathRule = `Write any mathematical expression in LaTeX between \`$…$\` (inline) or \`$$…$$\` (display). Never use \\( \\) or \\[ \\].`;
 
+const languageRule =
+  "- Write in the same language as the question and the student's answer. " +
+  "If they are in different languages, use the language of the question. " +
+  "Never translate the student's own words when you quote them.";
+
 export const goodTeacherSystemPrompt = (mode: EvaluationMode): string =>
   mode === "grounded"
     ? `You are the "Good Teacher" in a short-answer correction panel.
@@ -30,7 +35,8 @@ Strict rules:
 - You do NOT decide the grade. Your opinion is one input for the Judge, who will decide.
 - You may only rely on the page text provided below. You cannot assert anything not backed by that text.
 - Do not use external knowledge, even if you have it.
-- Answer in English, in a brief paragraph.
+- ${languageRule}
+- Be brief: a single paragraph.
 - ${mathRule}`
     : `You are the "Good Teacher" in a short-answer correction panel.
 
@@ -41,7 +47,8 @@ There is no source text available for this question. Decide whether the student'
 Strict rules:
 - You do NOT decide the grade. Your opinion is one input for the Judge, who will decide.
 - Do not use external knowledge beyond the expected answer provided.
-- Answer in English, in a brief paragraph.
+- ${languageRule}
+- Be brief: a single paragraph.
 - ${mathRule}`;
 
 export const badTeacherSystemPrompt = (mode: EvaluationMode): string =>
@@ -54,7 +61,8 @@ Strict rules:
 - You do NOT decide the grade. Your opinion is one input for the Judge, who will decide.
 - You may only rely on the page text provided below. You cannot assert anything not backed by that text.
 - Do not use external knowledge, even if you have it.
-- Answer in English, in a brief paragraph.
+- ${languageRule}
+- Be brief: a single paragraph.
 - ${mathRule}`
     : `You are the "Bad Teacher" in a short-answer correction panel.
 
@@ -65,7 +73,8 @@ There is no source text available for this question. Decide whether the student'
 Strict rules:
 - You do NOT decide the grade. Your opinion is one input for the Judge, who will decide.
 - Do not use external knowledge beyond the expected answer provided.
-- Answer in English, in a brief paragraph.
+- ${languageRule}
+- Be brief: a single paragraph.
 - ${mathRule}`;
 
 export const judgeSystemPrompt = (mode: EvaluationMode): string =>
@@ -79,7 +88,7 @@ Strict rules:
 - You must copy into "citas_pdf" LITERAL fragments from the provided text, word for word, without reformulating or summarising. Do not invent quotes.
 - Quotes are automatically verified by code against the original text: an invented or altered quote invalidates your answer.
 - If critiques from the teachers are not available, evaluate with the text and answers provided.
-- Answer in English.
+- ${languageRule}
 - ${mathRule}`
     : `You are the "Judge" in a short-answer correction panel.
 
@@ -89,7 +98,7 @@ Strict rules:
 - You do NOT have a source text. Base your decision solely on whether the student's answer is conceptually equivalent to the expected answer.
 - You MUST return \`citas_pdf: []\`.
 - If critiques from the teachers are not available, evaluate with the answers provided.
-- Answer in English.
+- ${languageRule}
 - ${mathRule}`;
 
 const questionContext = (input: EvaluationInput): string => {

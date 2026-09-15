@@ -104,6 +104,12 @@ En orden real de ejecución, no numérico.
 - **PR-07** — La UI enseña los tres agentes en vivo y las citas con su badge de verificación.
 - **PR-08** — Cierre de la suite de tests, evals sin API key y este README.
 
+**Mejoras post-entrega**
+
+- **PR-14** — Cuatro bugs de QA: el panel de 3 agentes siempre corre, el tutor conoce el ejercicio abierto, la agrupación de radio quedó rota, y el razonamiento de los profes se muestra en vivo.
+- **PR-15** — Reintentos con backoff exponencial y jitter en Gemini ante errores 408/429/5xx. Los mensajes de error dicen qué llamada falló.
+- **PR-16** — Cuatro bugs detectados en testing post-PR-14: `source` se omitía en los ejemplos del prompt (toda corrección salía "Graded without PDF evidence"), sin indicador de si el panel corrió o no, el razonamiento de los profes se perdía tras el streaming, y los prompts estaban harcodeados en inglés.
+
 ### Por qué hay un PR-1.5
 
 Con el PR-01 mergeado y antes de empezar la fase 2 me di cuenta de que faltaba una pieza

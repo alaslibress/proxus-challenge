@@ -6,9 +6,11 @@ import type {
   ArtifactAttempt,
   AttemptStreamEvent,
   EnrichedFeedbackSchema,
+  PanelStatus,
   QuestionCorrection,
   ShortAnswerCorrection,
-  TestQuestion
+  TestQuestion,
+  UngroundedReason
 } from "@proxus/shared";
 import type { PageText } from "../materials/material.ts";
 import { MaterialRepository } from "../materials/material.ts";
@@ -39,13 +41,15 @@ interface ResolvedEvidence {
   readonly materialId: string | undefined;
   readonly pages: readonly number[];
   readonly evidence: readonly PageText[];
+  readonly why?: UngroundedReason;
 }
 
-const ungrounded = (materialId?: string): ResolvedEvidence => ({
+const ungrounded = (why: UngroundedReason, materialId?: string): ResolvedEvidence => ({
   mode: "ungrounded",
   materialId,
   pages: [],
-  evidence: []
+  evidence: [],
+  why
 });
 
 /** La única regla que puede subir una nota: el Juez la da por correcta Y, en modo grounded,
@@ -64,13 +68,13 @@ const resolveEvidence = (
 ): Effect.Effect<ResolvedEvidence, never, MaterialRepository> =>
   Effect.gen(function* () {
     if (artifact.source === undefined) {
-      return ungrounded();
+      return ungrounded("no-source");
     }
 
     const materialId = artifact.source.materialId;
     const pages = evidenceForQuestion(artifact.source, question);
     if (pages.length === 0) {
-      return ungrounded(materialId);
+      return ungrounded("no-pages", materialId);
     }
 
     const materialRepository = yield* MaterialRepository;
@@ -78,16 +82,21 @@ const resolveEvidence = (
       .extractText(materialId, pages)
       .pipe(
         Effect.map((result) => result.pages),
-        Effect.orElseSucceed(() => undefined)
+        Effect.catch((error) =>
+          Effect.log("evidence.extraction_failed").pipe(
+            Effect.annotateLogs({ artifactId: artifact.id, error: String(error) }),
+            Effect.as(undefined)
+          )
+        )
       );
 
     if (pageTexts === undefined) {
-      return ungrounded(materialId);
+      return ungrounded("extract-failed", materialId);
     }
 
     const nonEmptyPages = pageTexts.filter((page) => page.text.trim().length > 0);
     if (nonEmptyPages.length === 0) {
-      return ungrounded(materialId);
+      return ungrounded("empty-pages", materialId);
     }
 
     return { mode: "grounded", materialId, pages, evidence: nonEmptyPages };
@@ -141,17 +150,25 @@ const reviewCorrection = (
     artifactId: artifact.id,
     deterministicScore,
     finalScore,
-    scoreOverridden
+    scoreOverridden,
+    ...(resolved.mode === "ungrounded" && resolved.why !== undefined ? { ungroundedWhy: resolved.why } : {})
   });
 
+  const panel: PanelStatus | undefined = outcome.review !== undefined
+    ? resolved.mode === "grounded"
+      ? { ran: true, grounded: true }
+      : { ran: true, grounded: false, why: resolved.why ?? "no-source" }
+    : { ran: false, why: "judge-unavailable" };
+
   if (outcome.review === undefined) {
-    return correction;
+    return { ...correction, ...(panel !== undefined ? { panel } : {}) };
   }
 
   return {
     ...correction,
     score: finalScore,
-    review: outcome.review
+    review: outcome.review,
+    ...(panel !== undefined ? { panel } : {})
   };
 });
 

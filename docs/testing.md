@@ -178,6 +178,16 @@ la nota se queda en la determinista. La ruta de degradación es real, no sólo d
       queda ningún estado colgado (ni `isSubmitting`, ni error fantasma).
     - Al terminar, revisa por cada `short-answer`: el feedback razonado del Juez, y sus
       citas.
+    - Comprueba el **indicador del panel** (`PanelIndicator`) encima del feedback:
+      - **`ran: true, grounded: true`** (PDF leído): icono 📄 y "Advanced reasoning ·
+        grounded in the PDF".
+      - **`ran: true, grounded: false`** (sin evidencia): icono 📋 y "Advanced reasoning ·
+        no PDF evidence" con detalle del motivo (`no-source`, `no-pages`, etc.).
+      - **`ran: false`** (motor caído): icono ⚠️ y "Advanced reasoning unavailable · automatic
+        mark stands".
+    - Si hay texto de algún profe, aparece el botón **"See the panel debate"**. Púlsalo y
+      verifica que el modal muestra las secciones Good Teacher, Bad Teacher y Judge, con el
+      texto o el motivo de fallo de cada uno, y las citas del Juez.
     - Comprueba las citas según el modo:
       - **grounded**: una cita `verified: true` sale con "Verified · … · p. N";
         una `verified: false` sale visualmente distinta con "Not verified against the PDF"
