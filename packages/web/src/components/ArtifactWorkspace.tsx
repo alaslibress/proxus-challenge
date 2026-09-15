@@ -14,6 +14,7 @@ import * as AsyncResult from "effect/unstable/reactivity/AsyncResult";
 import { artifactQuery, artifactsQuery, submitArtifactAttemptAction } from "../domain/artifacts/atoms.ts";
 import { streamAttemptSubmission } from "../domain/artifacts/attempt-stream.ts";
 import { evaluationRunAtom } from "../domain/artifacts/evaluation-atoms.ts";
+import { openExerciseAtom } from "../domain/artifacts/chat-context.ts";
 import { EvaluationProgress } from "./evaluation/EvaluationProgress.tsx";
 import { ShortAnswerDetails } from "./evaluation/CitationList.tsx";
 
@@ -165,7 +166,15 @@ function ExerciseSolver({ artifact }: { readonly artifact: Extract<Artifact, { r
   const [run, setRun] = useAtom(evaluationRunAtom(artifact.id));
   const submitAttempt = useAtomSet(submitArtifactAttemptAction, { mode: "promise" });
   const refreshArtifacts = useAtomRefresh(artifactsQuery);
+  const setOpenExercise = useAtomSet(openExerciseAtom);
   const abortRef = useRef<AbortController | undefined>(undefined);
+
+  useEffect(() => {
+    setOpenExercise({ artifactId: artifact.id });
+    return () => {
+      setOpenExercise(null);
+    };
+  }, [artifact.id, setOpenExercise]);
 
   const attempt = run.phase === "done" ? run.attempt : null;
   const isSubmitting = run.phase === "running";
@@ -184,6 +193,7 @@ function ExerciseSolver({ artifact }: { readonly artifact: Extract<Artifact, { r
     try {
       const result = await submitAttempt(payload);
       setRun({ phase: "done", attempt: result });
+      setOpenExercise({ artifactId: artifact.id, attemptId: result.id });
       refreshArtifacts();
     } catch (cause) {
       setRun({ phase: "error", message: cause instanceof Error ? cause.message : String(cause) });
@@ -222,6 +232,7 @@ function ExerciseSolver({ artifact }: { readonly artifact: Extract<Artifact, { r
         } else if (event.type === "done") {
           sawDone = true;
           setRun({ phase: "done", attempt: event.payload });
+          setOpenExercise({ artifactId: artifact.id, attemptId: event.payload.id });
           refreshArtifacts();
         } else if (event.type === "error") {
           setRun({ phase: "error", message: event.message });
