@@ -41,6 +41,8 @@ The tutor is not a bag of tools. `domain/agents/harness/harness.ts` exposes exac
 
 Gemini access is a custom `LanguageModel` layer hitting `generativelanguage.googleapis.com/v1beta` with `fetch`. Two sharp edges: `streamText` is `Stream.empty` (streaming to the browser comes from the agent loop, not from token streaming), and `toolParameters` in `gemini.ts` hardcodes JSON schemas per tool name with a numeric `a`/`b` fallback — new tools need a case there.
 
+**`Effect.tryPromise` catch trap (PR-15).** The `catch` callback in `Effect.tryPromise` receives *everything* thrown inside the `try` callback — including tagged errors you throw yourself. Without an explicit `instanceof` guard, a typed `GeminiTransportError` you throw to preserve the HTTP status code gets re-wrapped as an unknown `GeminiTransportError({ status: null })`, silently discarding the status and making any retry policy work blind. Pattern: always add `cause instanceof MyTaggedError ? cause : new MyTaggedError(...)` as the first branch in the `catch`.
+
 ### Request flow
 
 Typed REST endpoints go through `HttpApiBuilder` + `handlers.ts`. Chat is the exception: `POST /api/tutor/chat/stream` is a manual `HttpRouter` route emitting **NDJSON** (`{type:"message"|"done"}`), consumed by an async generator in `web/src/domain/tutor/stream.ts`; `web/src/domain/tutor/invalidation.ts` re-fetches artifact/material atoms when tool results arrive. Docs at `/docs` (Scalar) and `/openapi.json`.

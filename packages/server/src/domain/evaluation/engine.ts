@@ -25,7 +25,9 @@ export type EvaluationProgressEvent =
       readonly delta: string;
     };
 
-const TEACHER_TIMEOUT_MS = 20_000;
+// 30 s, no 20: desde el PR-15 el timeout cubre también el backoff de los reintentos
+// (hasta ~3,5 s) además de la generación completa del profe.
+const TEACHER_TIMEOUT_MS = 30_000;
 
 /** Lo que devuelve `evaluate`: el veredicto que consume la UI, y el borrador de traza
  * con todo lo que el motor sabe y `review.ts` no puede reconstruir (texto de cada profe

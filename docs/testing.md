@@ -225,6 +225,36 @@ la nota se queda en la determinista. La ruta de degradación es real, no sólo d
       requeridos por tipo de pregunta (`artifact-commands.ts`); ese texto va dirigido al
       modelo, y es la pista de qué se le olvidó documentar.
 
+## QA manual PR-15 — reintentos ante 503
+
+El 503 no se puede pedir a voluntad a Google, así que se provoca localmente.
+
+1. **Sin cambios (baseline).** Con `pnpm run dev` y API key válida: usa el chat y corrige
+   un test con respuestas cortas. En el log del server **no** debe aparecer ninguna línea
+   `gemini.retry`. Nada ha cambiado.
+
+2. **API key inválida (4xx no se reintenta).** Cambia `GOOGLE_GENERATIVE_AI_API_KEY` por
+   basura y reinicia. Manda un mensaje al tutor → el error aparece **inmediatamente**, sin
+   esperar varios segundos, y **no** hay líneas `gemini.retry` en el log. Prueba que los
+   4xx no se reintentan. Devuelve la key correcta y reinicia antes del paso siguiente.
+
+3. **503 simulado (transitorio).** Levanta un servidor local de un fichero que devuelva
+   `503` las dos primeras peticiones y luego haga de proxy (o que devuelva `503` siempre
+   para ver las tres líneas). Apunta `geminiUrl`/`geminiStreamUrl` en `gemini.ts` a ese
+   servidor. Manda un mensaje al tutor → en el log deben aparecer **hasta tres** líneas
+   `gemini.retry` con `status: 503`, esperas crecientes. Si el proxy termina cediendo,
+   el turno acaba con respuesta normal. **Revierte el cambio antes de commitear**;
+   `git status` debe quedar limpio.
+
+4. **Corte a mitad de stream.** Con el mismo servidor local, envía algunos eventos SSE y
+   luego corta la conexión. En la UI: el texto del profe se queda a medias, **no vuelve
+   a empezar desde el principio** y el panel termina igualmente con la nota determinista.
+   En el log, el campo `method` debe decir `streamText` para los profes y `generateText`
+   para el chat y el Juez.
+
+Si no hay API key ni servidor local disponibles, indicar explícitamente en el cuerpo del
+PR qué pasos se omitieron.
+
 ## Qué reportar en una entrega
 
 - Checks ejecutados y resultado.

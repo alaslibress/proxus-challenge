@@ -7,6 +7,7 @@ import {
 } from "effect/unstable/ai";
 import { resolveAllRefs, toGeminiResponseSchema } from "./gemini-schema.ts";
 import { parseSseChunk } from "./gemini-sse.ts";
+import { GeminiTransportError, isRetryableTransportError, geminiRetryPolicy } from "./gemini-retry.ts";
 
 const defaultModel = "gemini-3.6-flash";
 
@@ -65,10 +66,12 @@ const GeminiConfig = Effect.gen(function* () {
   };
 });
 
-const toAiError = (description: string) =>
+type GeminiMethod = "generateText" | "streamText";
+
+const toAiError = (method: GeminiMethod, description: string) =>
   AiError.make({
     module: "GeminiLanguageModel",
-    method: "generateText",
+    method,
     reason: new AiError.UnknownError({ description })
   });
 
@@ -354,29 +357,45 @@ interface GeminiCallResult {
   readonly promptFeedback: GeminiResponseType["promptFeedback"];
 }
 
+const fetchGeminiOnce = (url: string, body: unknown): Effect.Effect<unknown, GeminiTransportError> =>
+  Effect.tryPromise({
+    try: async (signal) => {
+      const response = await fetch(url, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(body),
+        signal
+      });
+
+      if (!response.ok) {
+        throw new GeminiTransportError({ status: response.status, body: await response.text() });
+      }
+
+      return response.json();
+    },
+    catch: (cause) =>
+      cause instanceof GeminiTransportError
+        ? cause
+        : new GeminiTransportError({ status: null, body: cause instanceof Error ? cause.message : String(cause) })
+  });
+
 const callGeminiOnce = (url: string, body: unknown): Effect.Effect<GeminiCallResult, AiError.AiError> =>
   Effect.gen(function* () {
-    const rawJson = yield* Effect.tryPromise({
-      try: async (signal) => {
-        const response = await fetch(url, {
-          method: "POST",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify(body),
-          signal
-        });
-
-        if (!response.ok) {
-          throw new Error(await response.text());
-        }
-
-        return response.json();
-      },
-      catch: (cause) => toAiError(cause instanceof Error ? cause.message : String(cause))
-    });
+    const rawJson = yield* fetchGeminiOnce(url, body).pipe(
+      Effect.tapError((error) =>
+        isRetryableTransportError(error)
+          ? Effect.log("gemini.retry").pipe(
+              Effect.annotateLogs({ method: "generateText", status: error.status, bodyPreview: error.body.slice(0, 200) })
+            )
+          : Effect.void
+      ),
+      Effect.retry(geminiRetryPolicy),
+      Effect.mapError((error) => toAiError("generateText", error.body))
+    );
 
     const json = yield* Effect.try({
       try: () => decodeGeminiResponse(rawJson),
-      catch: (cause) => toAiError(cause instanceof Error ? cause.message : String(cause))
+      catch: (cause) => toAiError("generateText", cause instanceof Error ? cause.message : String(cause))
     });
 
     const candidate = json.candidates?.[0];
@@ -402,6 +421,26 @@ const logGeminiResponse = (call: GeminiCallResult, extra?: Record<string, unknow
       ...extra
     })
   );
+
+const openGeminiStream = (url: string, body: unknown): Effect.Effect<globalThis.Response, GeminiTransportError> =>
+  Effect.tryPromise({
+    try: async (signal) => {
+      const response = await fetch(url, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(body),
+        signal
+      });
+      if (!response.ok) {
+        throw new GeminiTransportError({ status: response.status, body: await response.text() });
+      }
+      return response;
+    },
+    catch: (cause) =>
+      cause instanceof GeminiTransportError
+        ? cause
+        : new GeminiTransportError({ status: null, body: cause instanceof Error ? cause.message : String(cause) })
+  });
 
 export const GeminiLanguageModelLive = Layer.effect(
   LanguageModel.LanguageModel,
@@ -436,7 +475,7 @@ export const GeminiLanguageModelLive = Layer.effect(
 
           const result1 = yield* Effect.try({
             try: () => toResponseParts(call1.parts, call1.finishReason, options.tools),
-            catch: (cause) => toAiError(cause instanceof Error ? cause.message : String(cause))
+            catch: (cause) => toAiError("generateText", cause instanceof Error ? cause.message : String(cause))
           });
 
           if (result1.leakText === null) {
@@ -458,7 +497,7 @@ export const GeminiLanguageModelLive = Layer.effect(
 
           const result2 = yield* Effect.try({
             try: () => toResponseParts(call2.parts, call2.finishReason, options.tools),
-            catch: (cause) => toAiError(cause instanceof Error ? cause.message : String(cause))
+            catch: (cause) => toAiError("generateText", cause instanceof Error ? cause.message : String(cause))
           });
 
           if (result2.leakText === null) {
@@ -480,22 +519,21 @@ export const GeminiLanguageModelLive = Layer.effect(
           (queue) =>
             Effect.gen(function* () {
               const url = geminiStreamUrl(config.model, config.apiKey);
-              const response = yield* Effect.tryPromise({
-                try: () => fetch(url, { method: "POST", body: JSON.stringify(requestBody(options)) }),
-                catch: (cause) => toAiError(String(cause))
-              });
-
-              if (!response.ok) {
-                const body = yield* Effect.tryPromise({
-                  try: () => response.text(),
-                  catch: (cause) => toAiError(String(cause))
-                });
-                return yield* Effect.fail(toAiError(body));
-              }
+              const response = yield* openGeminiStream(url, requestBody(options)).pipe(
+                Effect.tapError((error) =>
+                  isRetryableTransportError(error)
+                    ? Effect.log("gemini.retry").pipe(
+                        Effect.annotateLogs({ method: "streamText", status: error.status, bodyPreview: error.body.slice(0, 200) })
+                      )
+                    : Effect.void
+                ),
+                Effect.retry(geminiRetryPolicy),
+                Effect.mapError((error) => toAiError("streamText", error.body))
+              );
 
               const reader = response.body?.getReader();
               if (reader === undefined) {
-                return yield* Effect.fail(toAiError("No response body"));
+                return yield* Effect.fail(toAiError("streamText", "No response body"));
               }
 
               const decoder = new TextDecoder();
@@ -504,10 +542,13 @@ export const GeminiLanguageModelLive = Layer.effect(
               let reasoningStarted = false;
 
               try {
+                // No retry inside the read loop: the student is already reading text on screen.
+                // Retrying would restart from zero and duplicate the streamed content.
+                // A mid-stream failure marks this teacher as failed; the panel continues with the other.
                 while (true) {
                   const { done, value } = yield* Effect.tryPromise({
                     try: () => reader.read(),
-                    catch: (cause) => toAiError(String(cause))
+                    catch: (cause) => toAiError("streamText", String(cause))
                   });
                   if (done) break;
 

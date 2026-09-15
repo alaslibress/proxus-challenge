@@ -325,6 +325,15 @@ Tres límites que condicionan cualquier diseño:
    al canal `text`. Errores del stream propagan vía `Queue.failCause`. El bucle del
    agente (`session.ts`) sigue usando `generateText` para los pasos de tool-call; solo
    el motor de evaluación usa `streamText`.
+4. **Reintentos ante errores transitorios (PR-15).** Las tres llamadas al proveedor
+   (`generateText`, `generateObject` vía `callGeminiOnce`, y `streamText` vía
+   `openGeminiStream`) reintentan automáticamente los códigos 408, 429 y 5xx con backoff
+   exponencial y jitter: 3 reintentos sobre el intento inicial, espera 500ms → 1s → 2s.
+   El reintento del streaming ocurre **solo antes del primer byte** (apertura de conexión);
+   una vez iniciado el reader loop no se reintenta, para no duplicar el texto ya pintado
+   en pantalla. El bucle del agente (`session.ts`) **no reintenta**: lo hace el proveedor,
+   un nivel por debajo, de modo que `generateText`, `generateObject` y `streamText` lo
+   heredan a la vez. Cada reintento emite un log `gemini.retry` con `method` y `status`.
 2. **Salida estructurada (PR-03).** El adaptador ahora honra `options.responseFormat`: si
    es `{ type: "json", schema, ... }`, `requestBody` añade
    `generationConfig: { responseMimeType: "application/json", responseSchema }`, con
