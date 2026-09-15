@@ -29,14 +29,13 @@ pnpm --filter @proxus/web run test         # sólo frontend
 pnpm --filter @proxus/server run test:watch
 ```
 
-Resultado actual: **21 ficheros, 190 tests, todos en verde** (server 16/157, web 5/33).
+Resultado actual: **25 ficheros, 222 tests, todos en verde** (server 19/182, web 6/40).
 
 Cubren el motor de evaluación y su degradación cuando un profe o el Juez caen, la
 verificación literal de citas, el formato de la traza Markdown, el purgado de schemas para
-Gemini, el lector NDJSON del navegador y el stream de evaluación.
+Gemini, el lector NDJSON del navegador, el stream de evaluación y el estado del panel.
 
-Los dos ficheros más recientes salieron de sendos bugs cazados en la QA de cierre, y son
-los que hay que mirar primero si se toca el harness o el schema de artifacts:
+Ficheros clave por área — mirar primero si se toca lo que protegen:
 
 - `packages/server/src/domain/agents/harness/__tests__/session-step-budget.test.ts`
   (**4 tests**). Con un `LanguageModel` falso que guioniza cuatro turnos que sólo llaman
@@ -52,6 +51,17 @@ los que hay que mirar primero si se toca el harness o el schema de artifacts:
   con los tres tipos de pregunta, escrito tal y como lo documenta la skill
   `create-study-artifacts`, decodifica entero. Este último es el que ata la documentación
   del agente al schema: si se separan, se pone rojo.
+- `packages/server/src/domain/evaluation/__tests__/prompts.test.ts` (**2 tests**, PR-16).
+  Recorre los seis system-prompts (Good Teacher, Bad Teacher y Judge × 2 modos) y
+  verifica que ninguno contiene "in English" y que todos incluyen la regla de idioma.
+  Si alguien reintroduce el hardcode en inglés, se pone rojo.
+- `packages/server/src/domain/evaluation/__tests__/schema-retrocompat.test.ts` (**3 tests**,
+  PR-16). Decodifica `ShortAnswerCorrection` sin los campos nuevos `panel`, `goodTeacher` y
+  `badTeacher`: garantiza que los intentos grabados antes de PR-16 siguen siendo legibles.
+- `packages/web/src/domain/artifacts/__tests__/panel-status.test.ts` (**7 tests**, PR-16).
+  Cubre los tres variantes de `PanelStatus` más el caso `undefined`, y los cuatro valores
+  de `why` en modo `ran+ungrounded`. Si se añade un nuevo `why`, falla hasta que se añade
+  su case en `panel-status.ts`.
 
 Lo que **no** cubren: la calidad de los prompts. Ante una respuesta X del Juez garantizan
 que el sistema hace Y; para saber si el Juez acierta hay que ejecutar la eval con LLM real
