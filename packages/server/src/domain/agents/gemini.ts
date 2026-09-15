@@ -1,4 +1,4 @@
-import { Config, Data, Effect, Layer, Redacted, Schema, Stream } from "effect";
+import { Config, Data, Effect, Layer, Queue, Redacted, Schema, Stream } from "effect";
 import {
   AiError,
   LanguageModel,
@@ -6,6 +6,7 @@ import {
   Response
 } from "effect/unstable/ai";
 import { resolveAllRefs, toGeminiResponseSchema } from "./gemini-schema.ts";
+import { parseSseChunk } from "./gemini-sse.ts";
 
 const defaultModel = "gemini-3.6-flash";
 
@@ -151,6 +152,9 @@ const promptContents = (prompt: LanguageModel.ProviderOptions["prompt"]): readon
 const geminiUrl = (model: string, apiKey: string) =>
   `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
 
+const geminiStreamUrl = (model: string, apiKey: string) =>
+  `https://generativelanguage.googleapis.com/v1beta/models/${model}:streamGenerateContent?alt=sse&key=${apiKey}`;
+
 const toolParameters = (toolName: string) => {
   switch (toolName) {
     case "load_skill":
@@ -248,7 +252,7 @@ const generationConfig = (options: LanguageModel.ProviderOptions) =>
           )
         )
       }
-    : undefined;
+    : { thinkingConfig: { includeThoughts: true } };
 
 const requestBody = (options: LanguageModel.ProviderOptions) => ({
   systemInstruction: promptSystemInstruction(options.prompt),
@@ -471,7 +475,85 @@ export const GeminiLanguageModelLive = Layer.effect(
           // Return empty parts — session.ts will continue the loop with a synthetic user message.
           return [];
         }),
-      streamText: () => Stream.empty
+      streamText: (options) =>
+        Stream.callback<Response.StreamPartEncoded, AiError.AiError>(
+          (queue) =>
+            Effect.gen(function* () {
+              const url = geminiStreamUrl(config.model, config.apiKey);
+              const response = yield* Effect.tryPromise({
+                try: () => fetch(url, { method: "POST", body: JSON.stringify(requestBody(options)) }),
+                catch: (cause) => toAiError(String(cause))
+              });
+
+              if (!response.ok) {
+                const body = yield* Effect.tryPromise({
+                  try: () => response.text(),
+                  catch: (cause) => toAiError(String(cause))
+                });
+                return yield* Effect.fail(toAiError(body));
+              }
+
+              const reader = response.body?.getReader();
+              if (reader === undefined) {
+                return yield* Effect.fail(toAiError("No response body"));
+              }
+
+              const decoder = new TextDecoder();
+              let buffer = "";
+              let textStarted = false;
+              let reasoningStarted = false;
+
+              try {
+                while (true) {
+                  const { done, value } = yield* Effect.tryPromise({
+                    try: () => reader.read(),
+                    catch: (cause) => toAiError(String(cause))
+                  });
+                  if (done) break;
+
+                  const chunk = decoder.decode(value, { stream: true });
+                  const { events, rest } = parseSseChunk(buffer, chunk);
+                  buffer = rest;
+
+                  for (const payload of events) {
+                    if (payload === "[DONE]") continue;
+                    let json: unknown;
+                    try { json = JSON.parse(payload); } catch { continue; }
+
+                    const decoded = Schema.decodeUnknownSync(GeminiResponse)(json);
+                    const candidate = decoded.candidates?.[0];
+                    const parts = candidate?.content?.parts ?? [];
+
+                    for (const part of parts) {
+                      if (part.thought === true && part.text !== undefined) {
+                        if (!reasoningStarted) {
+                          yield* Queue.offer(queue, { type: "reasoning-start", id: "reasoning" });
+                          reasoningStarted = true;
+                        }
+                        yield* Queue.offer(queue, { type: "reasoning-delta", id: "reasoning", delta: part.text });
+                      } else if (part.text !== undefined) {
+                        if (!textStarted) {
+                          yield* Queue.offer(queue, { type: "text-start", id: "text" });
+                          textStarted = true;
+                        }
+                        yield* Queue.offer(queue, { type: "text-delta", id: "text", delta: part.text });
+                      }
+                    }
+                  }
+                }
+              } finally {
+                reader.releaseLock();
+              }
+
+              if (reasoningStarted) yield* Queue.offer(queue, { type: "reasoning-end", id: "reasoning" });
+              if (textStarted) yield* Queue.offer(queue, { type: "text-end", id: "text" });
+              yield* Queue.end(queue);
+            }).pipe(
+              Effect.catchCause((cause) =>
+                Queue.failCause(queue, cause).pipe(Effect.asVoid)
+              )
+            )
+        )
     });
   })
 ).pipe(Layer.orDie);

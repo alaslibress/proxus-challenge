@@ -1,9 +1,9 @@
 import { Effect, Queue, Stream } from "effect";
+import type { EvaluationProgressEvent } from "./engine.ts";
 import { LanguageModel } from "effect/unstable/ai";
 import type {
   Artifact,
   ArtifactAttempt,
-  AttemptEvaluationStage,
   AttemptStreamEvent,
   EnrichedFeedbackSchema,
   QuestionCorrection,
@@ -98,7 +98,7 @@ const reviewCorrection = (
   attemptId: string,
   correction: ShortAnswerCorrection,
   studentAnswer: string,
-  emit?: (stage: AttemptEvaluationStage) => Effect.Effect<void>
+  emit?: (event: EvaluationProgressEvent) => Effect.Effect<void>
 ): Effect.Effect<
   ShortAnswerCorrection,
   never,
@@ -232,15 +232,12 @@ const executeStreaming = (
         return Effect.succeed(correction);
       }
 
-      const stageEmit = (stage: AttemptEvaluationStage) => emit({
-        type: "status",
-        value: stage,
-        questionId: correction.questionId,
-        questionIndex,
-        questionTotal: total
-      });
+      const panelEmit = (event: EvaluationProgressEvent) =>
+        event._tag === "stage"
+          ? emit({ type: "status", value: event.stage, questionId: correction.questionId, questionIndex, questionTotal: total })
+          : emit({ type: "reasoning", agent: event.agent, channel: event.channel, delta: event.delta, questionId: correction.questionId, questionIndex, questionTotal: total });
 
-      return reviewCorrection(artifact, attempt.id, correction, answer.answer, stageEmit);
+      return reviewCorrection(artifact, attempt.id, correction, answer.answer, panelEmit);
     };
 
     const corrections: QuestionCorrection[] = yield* Effect.forEach(attempt.corrections, reviewOne);

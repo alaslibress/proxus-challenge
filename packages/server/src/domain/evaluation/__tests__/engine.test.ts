@@ -1,17 +1,19 @@
 import { describe, it, expect } from "vitest";
-import { Data, Effect, Layer } from "effect";
-import { AiError, LanguageModel } from "effect/unstable/ai";
-import { EvaluationEngineService, EvaluationEngineServiceLive, type EvaluationInput } from "../engine.ts";
+import { Data, Effect, Layer, Stream } from "effect";
+import { AiError, LanguageModel, Response } from "effect/unstable/ai";
+import { EvaluationEngineService, EvaluationEngineServiceLive, type EvaluationInput, type EvaluationProgressEvent } from "../engine.ts";
 
 class FakeModelError extends Data.TaggedError("FakeModelError")<{ readonly reason: string }> {}
 
 // A fake LanguageModel avoids depending on real Gemini credentials: text/object
 // generation is entirely under the test's control here, mirroring the fake PdfService
 // pattern used in file-material-repository.test.ts.
-const textResponse = (text: string) => ({
-  content: [{ type: "text" as const, text }],
-  text
-});
+const teacherStream = (text: string): Stream.Stream<Response.StreamPartEncoded> =>
+  Stream.make<Response.StreamPartEncoded>(
+    { type: "text-start" as const, id: "text" },
+    { type: "text-delta" as const, id: "text", delta: text },
+    { type: "text-end" as const, id: "text" }
+  );
 
 const makeFakeLanguageModel = (options: {
   readonly goodText?: string;
@@ -22,22 +24,10 @@ const makeFakeLanguageModel = (options: {
   readonly failJudge?: boolean;
   /** El Juez devolvió texto que no decodifica contra FinalFeedbackSchema (PR-08). */
   readonly failJudgeWithMalformedJson?: boolean;
-  readonly onGenerateText?: (systemPrompt: string) => void;
+  readonly onStreamText?: (systemPrompt: string) => void;
 }) =>
   Layer.succeed(LanguageModel.LanguageModel)({
-    generateText: ((params: { readonly prompt: readonly { readonly role: string; readonly content: string }[] }) => {
-      const systemPrompt = params.prompt[0]?.content ?? "";
-      options.onGenerateText?.(systemPrompt);
-      const isGood = systemPrompt.includes("Good Teacher");
-      if (isGood && options.failGood === true) {
-        return Effect.fail(new FakeModelError({ reason: "good teacher failed" }));
-      }
-      if (!isGood && options.failBad === true) {
-        return Effect.fail(new FakeModelError({ reason: "bad teacher failed" }));
-      }
-      const text = isGood ? options.goodText ?? "buena respuesta" : options.badText ?? "mala respuesta";
-      return Effect.succeed(textResponse(text));
-    }) as unknown as LanguageModel.Service["generateText"],
+    generateText: (() => Effect.die("teachers now use streamText")) as unknown as LanguageModel.Service["generateText"],
     generateObject: (() => {
       if (options.failJudgeWithMalformedJson === true) {
         // Es exactamente lo que produce generateObject cuando el modelo devuelve JSON que
@@ -59,7 +49,19 @@ const makeFakeLanguageModel = (options: {
         value
       });
     }) as unknown as LanguageModel.Service["generateObject"],
-    streamText: (() => Effect.die("not used")) as unknown as LanguageModel.Service["streamText"]
+    streamText: ((params: { readonly prompt: readonly { readonly role: string; readonly content: string }[] }) => {
+      const systemPrompt = params.prompt[0]?.content ?? "";
+      options.onStreamText?.(systemPrompt);
+      const isGood = systemPrompt.includes("Good Teacher");
+      if (isGood && options.failGood === true) {
+        return Stream.fail(new FakeModelError({ reason: "good teacher failed" }));
+      }
+      if (!isGood && options.failBad === true) {
+        return Stream.fail(new FakeModelError({ reason: "bad teacher failed" }));
+      }
+      const text = isGood ? options.goodText ?? "buena respuesta" : options.badText ?? "mala respuesta";
+      return teacherStream(text);
+    }) as unknown as LanguageModel.Service["streamText"]
   });
 
 const baseInput: EvaluationInput = {
@@ -121,7 +123,7 @@ describe("EvaluationEngineService.evaluate", () => {
     const model = makeFakeLanguageModel({
       failGood: true,
       judgeValue: { is_correct: false, feedback: "Falta precisión.", citas_pdf: [] },
-      onGenerateText: (systemPrompt) => seenSystemPrompts.push(systemPrompt)
+      onStreamText: (systemPrompt) => seenSystemPrompts.push(systemPrompt)
     });
 
     const result = await Effect.runPromise(runEvaluate(baseInput, model));
@@ -181,6 +183,48 @@ describe("EvaluationEngineService.evaluate", () => {
     const result = await Effect.runPromise(runEvaluate(baseInput, model));
 
     expect(result.feedback.citas_pdf).toEqual([]);
+  });
+
+  it("streaming: text deltas arrive at emit with correct agent and in order, accumulated text equals concatenation", async () => {
+    const receivedEvents: EvaluationProgressEvent[] = [];
+    const model = makeFakeLanguageModel({
+      goodText: "good-delta",
+      badText: "bad-delta"
+    });
+
+    await Effect.runPromise(
+      Effect.gen(function* () {
+        const engine = yield* EvaluationEngineService;
+        return yield* engine.evaluate(baseInput, (event) => Effect.sync(() => { receivedEvents.push(event); }));
+      }).pipe(Effect.provide(EvaluationEngineServiceLive), Effect.provide(model))
+    );
+
+    const textDeltas = receivedEvents.filter(
+      (e): e is Extract<EvaluationProgressEvent, { _tag: "reasoning" }> => e._tag === "reasoning" && e.channel === "text"
+    );
+    const goodDeltas = textDeltas.filter((e) => e.agent === "good_teacher");
+    const badDeltas = textDeltas.filter((e) => e.agent === "bad_teacher");
+
+    expect(goodDeltas.map((e) => e.delta).join("")).toBe("good-delta");
+    expect(badDeltas.map((e) => e.delta).join("")).toBe("bad-delta");
+  });
+
+  it("streaming: a teacher whose stream emits no text is treated as failed (fallback to No disponible)", async () => {
+    // A stream with no text-delta parts should fail runTeacher
+    const model = Layer.succeed(LanguageModel.LanguageModel)({
+      generateText: (() => Effect.die("not used")) as unknown as LanguageModel.Service["generateText"],
+      generateObject: (() => {
+        const value = { is_correct: true, feedback: "judge ok", citas_pdf: [] };
+        return Effect.succeed({ content: [], text: "", value });
+      }) as unknown as LanguageModel.Service["generateObject"],
+      streamText: (() => Stream.empty) as unknown as LanguageModel.Service["streamText"]
+    });
+
+    const result = await Effect.runPromise(runEvaluate(baseInput, model));
+
+    // Judge still runs (mode: result tolerates teacher failure), result has a trace
+    expect(result.trace.goodTeacher.ok).toBe(false);
+    expect(result.trace.badTeacher.ok).toBe(false);
   });
 
   it("in ungrounded mode: does not call verifyCitations, returns citas_pdf: [] and grounded: false", async () => {

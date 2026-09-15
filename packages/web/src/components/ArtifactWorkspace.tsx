@@ -13,7 +13,7 @@ import { Markdown } from "./Markdown.tsx";
 import * as AsyncResult from "effect/unstable/reactivity/AsyncResult";
 import { artifactQuery, artifactsQuery, submitArtifactAttemptAction } from "../domain/artifacts/atoms.ts";
 import { streamAttemptSubmission } from "../domain/artifacts/attempt-stream.ts";
-import { evaluationRunAtom } from "../domain/artifacts/evaluation-atoms.ts";
+import { emptyTranscript, evaluationRunAtom } from "../domain/artifacts/evaluation-atoms.ts";
 import { openExerciseAtom } from "../domain/artifacts/chat-context.ts";
 import { ARTIFACT_KIND_LABEL, QUESTION_TYPE_LABEL } from "../domain/artifacts/labels.ts";
 import { EvaluationProgress } from "./evaluation/EvaluationProgress.tsx";
@@ -209,7 +209,7 @@ function ExerciseSolver({ artifact }: { readonly artifact: Extract<Artifact, { r
     const payload = buildSubmitInput(artifact, answers);
     const controller = new AbortController();
     abortRef.current = controller;
-    setRun({ phase: "running", activeStages: [], questionId: "", questionIndex: 0, questionTotal: 0 });
+    setRun({ phase: "running", activeStages: [], questionId: "", questionIndex: 0, questionTotal: 0, transcript: emptyTranscript });
 
     try {
       let sawDone = false;
@@ -217,7 +217,8 @@ function ExerciseSolver({ artifact }: { readonly artifact: Extract<Artifact, { r
         if (event.type === "status") {
           setRun((current) => {
             if (current.phase !== "running") return current;
-            const activeStages = event.questionId !== current.questionId || current.activeStages.length === 0
+            const isNewQuestion = event.questionId !== current.questionId;
+            const activeStages = isNewQuestion || current.activeStages.length === 0
               ? [event.value]
               : event.value === "deliberating"
                 ? [event.value]
@@ -227,7 +228,23 @@ function ExerciseSolver({ artifact }: { readonly artifact: Extract<Artifact, { r
               activeStages,
               questionId: event.questionId,
               questionIndex: event.questionIndex,
-              questionTotal: event.questionTotal
+              questionTotal: event.questionTotal,
+              transcript: isNewQuestion ? emptyTranscript : current.transcript
+            };
+          });
+        } else if (event.type === "reasoning") {
+          setRun((current) => {
+            if (current.phase !== "running" || event.questionId !== current.questionId) return current;
+            const agentTranscript = current.transcript[event.agent];
+            return {
+              ...current,
+              transcript: {
+                ...current.transcript,
+                [event.agent]: {
+                  ...agentTranscript,
+                  [event.channel]: agentTranscript[event.channel] + event.delta
+                }
+              }
             };
           });
         } else if (event.type === "done") {

@@ -17,10 +17,25 @@ export const AttemptEvaluationStage = Schema.Union([
 ]);
 export type AttemptEvaluationStage = typeof AttemptEvaluationStage.Type;
 
+export const PanelAgent = Schema.Union([
+  Schema.Literal("good_teacher"),
+  Schema.Literal("bad_teacher")
+]);
+export type PanelAgent = typeof PanelAgent.Type;
+
 export const AttemptStreamEvent = Schema.Union([
   Schema.Struct({
     type: Schema.Literal("status"),
     value: AttemptEvaluationStage,
+    questionId: Schema.String,
+    questionIndex: Schema.Number,
+    questionTotal: Schema.Number
+  }),
+  Schema.Struct({
+    type: Schema.Literal("reasoning"),
+    agent: PanelAgent,
+    channel: Schema.Union([Schema.Literal("thought"), Schema.Literal("text")]),
+    delta: Schema.String,
     questionId: Schema.String,
     questionIndex: Schema.Number,
     questionTotal: Schema.Number
