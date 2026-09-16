@@ -2,7 +2,7 @@
 
 **Rama**: `feat/razonamiento-persistente`
 **Depende de**: sale de `feat/panel-transparente` (`2ccfa3c`), **no de `main`**. Toca `engine.ts`, `PanelAgentOutcome`, `PanelDebateModal.tsx`, `CitationList.tsx` y `EvaluationProgress.tsx` — los cinco los escribió o reescribió el PR-16 hace horas. Desde `main` es conflicto seguro.
-**Estado**: borrador
+**Estado**: aplicado — QA manual pasada el 16-sep-2026
 **Contiene LLM**: no — no se toca ni un prompt. Solo se captura y se transporta lo que el modelo ya emite.
 **Fichero delicado**: `packages/server/src/domain/evaluation/engine.ts`. Se toca `runTeacher` y `teacherOutcome`. **No se toca** el Juez (`generateObject`, L142-154), ni el paralelismo `mode: "result"` (L112-118), ni el timeout de 30 s (L30).
 **Origen**: petición del usuario del 16-sep-2026: *"un botón que nos permita ver el razonamiento de los profesores aunque este termine de razonar, pero que podamos ver el historial de razonamiento del profe bueno y malo; ahora mismo esto desaparece cuando termina su razonamiento"*.

@@ -300,6 +300,8 @@ PR qué pasos se omitieron.
 
 ## QA manual PR-17 — razonamiento persistente
 
+**Ejecutada el 16-sep-2026 por el usuario: los once puntos en verde.**
+
 Requiere API key y un modelo que devuelva thinking. Si no la hay, decirlo explícitamente en
 el cuerpo del PR.
 
