@@ -1,7 +1,6 @@
 import type { PanelStatus } from "@proxus/shared";
 
 export interface PanelStatusDisplay {
-  readonly icon: string;
   readonly label: string;
   readonly detail: string;
 }
@@ -11,7 +10,6 @@ export function describePanelStatus(panel: PanelStatus | undefined): PanelStatus
 
   if (!panel.ran) {
     return {
-      icon: "⚠️",
       label: "Advanced reasoning unavailable · automatic mark stands",
       detail: "The panel did not run. The score shown is the deterministic result."
     };
@@ -19,7 +17,6 @@ export function describePanelStatus(panel: PanelStatus | undefined): PanelStatus
 
   if (panel.grounded) {
     return {
-      icon: "📄",
       label: "Advanced reasoning · grounded in the PDF",
       detail: "The panel read the source PDF pages to assess this answer."
     };
@@ -43,7 +40,6 @@ export function describePanelStatus(panel: PanelStatus | undefined): PanelStatus
   }
 
   return {
-    icon: "📋",
     label: "Advanced reasoning · no PDF evidence",
     detail
   };

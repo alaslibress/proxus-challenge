@@ -6,21 +6,19 @@ describe("describePanelStatus", () => {
     expect(describePanelStatus(undefined)).toBeUndefined();
   });
 
-  it("ran: false → unavailable icon and label", () => {
+  it("ran: false → unavailable label", () => {
     const result = describePanelStatus({ ran: false, why: "judge-unavailable" });
-    expect(result?.icon).toBe("⚠️");
     expect(result?.label).toContain("unavailable");
   });
 
-  it("ran: true, grounded: true → grounded icon and label", () => {
+  it("ran: true, grounded: true → grounded label", () => {
     const result = describePanelStatus({ ran: true, grounded: true });
-    expect(result?.icon).toBe("📄");
     expect(result?.label).toContain("grounded");
   });
 
-  it("ran: true, grounded: false, why: 'no-source' → detail mentions material", () => {
+  it("ran: true, grounded: false, why: 'no-source' → no-evidence label and detail mentions material", () => {
     const result = describePanelStatus({ ran: true, grounded: false, why: "no-source" });
-    expect(result?.icon).toBe("📋");
+    expect(result?.label).toContain("no PDF evidence");
     expect(result?.detail).toContain("material");
   });
 

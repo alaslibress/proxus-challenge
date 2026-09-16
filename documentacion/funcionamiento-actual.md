@@ -250,7 +250,7 @@ panel pudo o no anclarse al PDF:
 - `{ ran: false, why: "judge-unavailable" }` — el motor falló (timeout, cuota, JSON
   inválido); la corrección determinista se conserva intacta.
 
-La UI muestra un `PanelIndicator` con icono y etiqueta encima del feedback del Juez, y
+La UI muestra un `PanelIndicator` con la etiqueta de estado encima del feedback del Juez, y
 un botón "See the panel debate" que abre un modal `PanelDebateModal` con el texto de cada
 profe (o su motivo de fallo) y las citas del Juez.
 

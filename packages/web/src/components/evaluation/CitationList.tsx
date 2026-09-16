@@ -10,7 +10,7 @@ function PanelIndicator({ correction }: { readonly correction: ShortAnswerCorrec
 
   return (
     <p style={{ fontSize: 12, color: "var(--color-ink-mute)", marginBottom: "0.5rem" }}>
-      {display.icon} <span style={{ fontWeight: 500 }}>{display.label}</span>
+      <span style={{ fontWeight: 500 }}>{display.label}</span>
       {" — "}<span style={{ fontStyle: "italic" }}>{display.detail}</span>
     </p>
   );
