@@ -281,9 +281,11 @@ el sistema con ello. Cubren, entre otras cosas:
 Además, la suite se ha comprobado **rompiéndola a propósito**: relajando
 `panelRaisesScore` (`domain/evaluation/review.ts`) para que la nota suba con `is_correct` a
 secas —es decir, quitando la exigencia de cita `verified` en modo `grounded`— se ponen en
-rojo **cinco tests**, todos en `review.test.ts`. La medición se hizo con la suite del PR-08
-(cinco en rojo sobre los 131 del servidor de entonces) y no se ha vuelto a ejecutar desde
-entonces; los nombres de abajo sí están puestos al día con los del fichero:
+rojo **cinco tests**, todos en `review.test.ts`. La medición está repetida sobre la rama
+actual el 16-sep-2026: con la mutación puesta, `pnpm --filter @proxus/server run test` da
+`Test Files 1 failed | 18 passed (19)` y `Tests 5 failed | 184 passed (189)`; al revertirla,
+vuelve a `19 passed (19)` y `189 passed (189)`. Los cinco en rojo, copiados de la salida de
+vitest:
 
 - `reviewGradedAttempt › does NOT raise the grade when the citation is
   invented/unverifiable against the real text`
@@ -296,10 +298,11 @@ entonces; los nombres de abajo sí están puestos al día con los del fichero:
 - `panelRaisesScore › does NOT raise the score (grounded) when the judge says correct but
   cites nothing`
 
-Los demás casos de `describe("panelRaisesScore")` siguen verdes, y así debe ser: cubren la
-dirección contraria de la regla (correcta + cita verificada **sí** sube; incorrecta con
-cita verificada no sube; sin panel no sube) y el modo `ungrounded`, donde basta con que el
-Juez diga que es correcta y por tanto la mutación no cambia nada.
+De los **siete** casos que tiene hoy `describe("panelRaisesScore")`, la mutación tumba dos
+y los otros cinco siguen verdes, y así debe ser: cubren la dirección contraria de la regla
+(correcta + cita verificada **sí** sube; incorrecta con cita verificada no sube; sin panel
+no sube) y los dos del modo `ungrounded`, donde la regla ya sólo exige `is_correct` y por
+tanto la mutación no los toca.
 Una suite que no puede ponerse roja no vale nada.
 
 ### Checks contra Gemini de verdad
@@ -397,13 +400,13 @@ reimplementando por su cuenta una regla que el motor tiene más estricta: la not
 si el Juez la da por correcta **y** al menos una cita quedó `verified`. Una demo que dice
 "nota modificada por el panel" cuando el producto no la habría modificado es peor que no
 tener demo. El arreglo no es parchear el script: la regla se extrae a `panelRaisesScore`
-(`domain/evaluation/review.ts:72-76`), el motor la usa (`review.ts:164`) y el script la
+(`domain/evaluation/review.ts:58-63`), el motor la usa (`review.ts:142`) y el script la
 importa, así que no pueden volver a divergir.
 
 Test: `packages/server/src/domain/evaluation/__tests__/review.test.ts` gana un
 `describe("panelRaisesScore")` con 5 casos —correcta + cita verificada sube; correcta con
 cita sin verificar no sube; correcta sin citas no sube; incorrecta con cita verificada no
-sube; sin panel no sube—. Se prueba la función directamente porque `panel.check.ts` es un
+sube; sin panel no sube—. Hoy son siete: los dos del modo `ungrounded` llegaron después. Se prueba la función directamente porque `panel.check.ts` es un
 ejecutable con `argv` y no se puede invocar desde vitest.
 
 ## 5. Qué haría después
