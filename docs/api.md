@@ -84,6 +84,15 @@ varias preguntas cortas los tres estados se repiten una vez por pregunta. `done.
 devuelve `POST /api/artifacts/:id/submit` con el mismo cuerpo. Un fallo del motor produce un frame
 `error` y el stream se cierra limpiamente: nunca se corta la conexión sin un frame terminal.
 
+Cada `ShortAnswerCorrection` dentro del payload lleva dos campos opcionales añadidos en PR-16:
+
+- `panel?: PanelStatus` — estado del razonamiento avanzado: `{ran:true,grounded:true}`,
+  `{ran:true,grounded:false,why}` (donde `why` ∈ `"no-source"|"no-pages"|"extract-failed"|"empty-pages"`)
+  o `{ran:false,why:"judge-unavailable"}`.
+- `review.goodTeacher?` / `review.badTeacher?` — texto o motivo de fallo de cada profe, como
+  `{status:"ok",text}` o `{status:"failed",reason}`. Permite mostrar el debate completo en la UI
+  aunque el streaming ya haya terminado.
+
 ## Tipos de artifact
 
 - `note`: contenido markdown.

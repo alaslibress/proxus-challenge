@@ -2,10 +2,17 @@ import { Schema } from "effect";
 import { HttpApiEndpoint, HttpApiGroup } from "effect/unstable/httpapi";
 import { AgentMessage } from "../schemas/agent-message.ts";
 
+export const OpenExerciseRef = Schema.Struct({
+  artifactId: Schema.String,
+  attemptId: Schema.optional(Schema.String)
+});
+export type OpenExerciseRef = typeof OpenExerciseRef.Type;
+
 export const TutorChatRequest = Schema.Struct({
   messages: Schema.Array(AgentMessage),
   input: Schema.String,
-  maxSteps: Schema.optional(Schema.Number)
+  maxSteps: Schema.optional(Schema.Number),
+  openExercise: Schema.optional(OpenExerciseRef)
 });
 export type TutorChatRequest = typeof TutorChatRequest.Type;
 

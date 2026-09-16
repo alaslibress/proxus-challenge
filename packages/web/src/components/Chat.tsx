@@ -1,6 +1,6 @@
 import type { AgentMessage } from "@proxus/shared";
-import { Streamdown } from "streamdown";
 import "streamdown/styles.css";
+import { Markdown } from "./Markdown.tsx";
 import { useTutorChat } from "../domain/tutor/use-tutor-chat.ts";
 
 const starterPrompts = [
@@ -227,7 +227,7 @@ function MessageBubble({ message }: { readonly message: AgentMessage }) {
         {message.role === "user" ? "You" : "Tutor"}
       </span>
       <div className="text-ink-soft" style={{ fontSize: 14.5, lineHeight: 1.7 }}>
-        <Streamdown>{message.content}</Streamdown>
+        <Markdown>{message.content}</Markdown>
       </div>
     </article>
   );

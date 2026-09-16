@@ -9,11 +9,14 @@ import type {
   TestQuestion
 } from "@proxus/shared";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Streamdown } from "streamdown";
+import { Markdown } from "./Markdown.tsx";
 import * as AsyncResult from "effect/unstable/reactivity/AsyncResult";
 import { artifactQuery, artifactsQuery, submitArtifactAttemptAction } from "../domain/artifacts/atoms.ts";
 import { streamAttemptSubmission } from "../domain/artifacts/attempt-stream.ts";
-import { evaluationRunAtom } from "../domain/artifacts/evaluation-atoms.ts";
+import { emptyTranscripts, evaluationRunAtom } from "../domain/artifacts/evaluation-atoms.ts";
+import { appendDelta } from "../domain/artifacts/transcripts.ts";
+import { openExerciseAtom } from "../domain/artifacts/chat-context.ts";
+import { ARTIFACT_KIND_LABEL, QUESTION_TYPE_LABEL } from "../domain/artifacts/labels.ts";
 import { EvaluationProgress } from "./evaluation/EvaluationProgress.tsx";
 import { ShortAnswerDetails } from "./evaluation/CitationList.tsx";
 
@@ -154,7 +157,7 @@ function NoteViewer({ artifact }: { readonly artifact: Extract<Artifact, { reado
         {artifact.title}
       </h2>
       <div className="prose prose-invert max-w-none">
-        <Streamdown>{artifact.markdown}</Streamdown>
+        <Markdown>{artifact.markdown}</Markdown>
       </div>
     </article>
   );
@@ -165,7 +168,15 @@ function ExerciseSolver({ artifact }: { readonly artifact: Extract<Artifact, { r
   const [run, setRun] = useAtom(evaluationRunAtom(artifact.id));
   const submitAttempt = useAtomSet(submitArtifactAttemptAction, { mode: "promise" });
   const refreshArtifacts = useAtomRefresh(artifactsQuery);
+  const setOpenExercise = useAtomSet(openExerciseAtom);
   const abortRef = useRef<AbortController | undefined>(undefined);
+
+  useEffect(() => {
+    setOpenExercise({ artifactId: artifact.id });
+    return () => {
+      setOpenExercise(null);
+    };
+  }, [artifact.id, setOpenExercise]);
 
   const attempt = run.phase === "done" ? run.attempt : null;
   const isSubmitting = run.phase === "running";
@@ -184,6 +195,7 @@ function ExerciseSolver({ artifact }: { readonly artifact: Extract<Artifact, { r
     try {
       const result = await submitAttempt(payload);
       setRun({ phase: "done", attempt: result });
+      setOpenExercise({ artifactId: artifact.id, attemptId: result.id });
       refreshArtifacts();
     } catch (cause) {
       setRun({ phase: "error", message: cause instanceof Error ? cause.message : String(cause) });
@@ -198,7 +210,7 @@ function ExerciseSolver({ artifact }: { readonly artifact: Extract<Artifact, { r
     const payload = buildSubmitInput(artifact, answers);
     const controller = new AbortController();
     abortRef.current = controller;
-    setRun({ phase: "running", activeStages: [], questionId: "", questionIndex: 0, questionTotal: 0 });
+    setRun({ phase: "running", activeStages: [], questionId: "", questionIndex: 0, questionTotal: 0, transcripts: emptyTranscripts });
 
     try {
       let sawDone = false;
@@ -206,7 +218,8 @@ function ExerciseSolver({ artifact }: { readonly artifact: Extract<Artifact, { r
         if (event.type === "status") {
           setRun((current) => {
             if (current.phase !== "running") return current;
-            const activeStages = event.questionId !== current.questionId || current.activeStages.length === 0
+            const isNewQuestion = event.questionId !== current.questionId;
+            const activeStages = isNewQuestion || current.activeStages.length === 0
               ? [event.value]
               : event.value === "deliberating"
                 ? [event.value]
@@ -216,12 +229,19 @@ function ExerciseSolver({ artifact }: { readonly artifact: Extract<Artifact, { r
               activeStages,
               questionId: event.questionId,
               questionIndex: event.questionIndex,
-              questionTotal: event.questionTotal
+              questionTotal: event.questionTotal,
+              transcripts: current.transcripts
             };
+          });
+        } else if (event.type === "reasoning") {
+          setRun((current) => {
+            if (current.phase !== "running") return current;
+            return { ...current, transcripts: appendDelta(current.transcripts, event) };
           });
         } else if (event.type === "done") {
           sawDone = true;
           setRun({ phase: "done", attempt: event.payload });
+          setOpenExercise({ artifactId: artifact.id, attemptId: event.payload.id });
           refreshArtifacts();
         } else if (event.type === "error") {
           setRun({ phase: "error", message: event.message });
@@ -264,7 +284,7 @@ function ExerciseSolver({ artifact }: { readonly artifact: Extract<Artifact, { r
             textTransform: "uppercase",
           }}
         >
-          {artifact.kind}
+          {ARTIFACT_KIND_LABEL[artifact.kind]}
         </p>
         <h2 className="text-ink" style={{ fontSize: 20, fontWeight: 600, letterSpacing: "-.02em" }}>
           {artifact.title}
@@ -272,6 +292,11 @@ function ExerciseSolver({ artifact }: { readonly artifact: Extract<Artifact, { r
         <p className="mt-2 text-ink-mute" style={{ fontSize: 13 }}>
           Answer every question, submit, and review your corrections.
         </p>
+        {artifact.kind === "quiz" && (
+          <p className="mt-2 text-ink-mute" style={{ fontSize: 12.5, fontStyle: "italic" }}>
+            A quiz is graded deterministically. The three-agent panel reviews the short answers of a test.
+          </p>
+        )}
       </header>
 
       <div className="grid gap-4">
@@ -328,7 +353,7 @@ function ExerciseSolver({ artifact }: { readonly artifact: Extract<Artifact, { r
                   disabled={unansweredQuestions.length > 0 || isSubmitting}
                   onClick={submit}
                 >
-                  {isSubmitting ? "Submitting…" : `Submit ${artifact.kind}`}
+                  {isSubmitting ? "Submitting…" : `Submit ${ARTIFACT_KIND_LABEL[artifact.kind]}`}
                 </button>
               </div>
             )}
@@ -384,19 +409,20 @@ function QuestionCard({
             style={{
               borderRadius: 7,
               padding: "6px 10px",
-              fontFamily: "var(--font-mono)",
               fontSize: 11,
-              letterSpacing: ".1em",
             }}
           >
-            {question.type}
+            {QUESTION_TYPE_LABEL[question.type]}
           </span>
           <h3
             className="text-ink"
-            style={{ fontSize: 19, fontWeight: 500, lineHeight: 1.45, maxWidth: "46ch", textWrap: "pretty" } as React.CSSProperties}
+            style={{ fontSize: 19, fontWeight: 500, lineHeight: 1.45 }}
           >
-            {index + 1}. {question.prompt}
+            {index + 1}.
           </h3>
+          <div className="mt-1 text-ink" style={{ fontSize: 19, fontWeight: 500, lineHeight: 1.45, maxWidth: "46ch" } as React.CSSProperties}>
+            <Markdown>{question.prompt}</Markdown>
+          </div>
         </div>
         {correction !== undefined && <CorrectionBadge correction={correction} />}
       </div>
@@ -405,7 +431,7 @@ function QuestionCard({
         <MultipleChoiceInput question={question} value={value} disabled={disabled} onChange={onChange} />
       )}
       {question.type === "true-false" && (
-        <TrueFalseInput value={value} disabled={disabled} onChange={onChange} />
+        <TrueFalseInput question={question} value={value} disabled={disabled} onChange={onChange} />
       )}
       {question.type === "short-answer" && (
         <textarea
@@ -452,32 +478,37 @@ function MultipleChoiceInput({
 }) {
   return (
     <div className="grid gap-2">
-      {question.options.map((option) => (
-        <label
-          className="flex cursor-pointer items-center gap-3 border border-line bg-surface-muted hover:bg-surface"
-          style={{ borderRadius: 16, padding: 12, transitionDuration: "120ms", transitionTimingFunction: "var(--ease-dc)" }}
-          key={option.id}
-        >
-          <input
-            type="radio"
-            name={question.id}
-            value={option.id}
-            checked={value === option.id}
-            disabled={disabled}
-            onChange={() => onChange(option.id)}
-          />
-          <span className="text-ink" style={{ fontSize: 13.5 }}>{option.text}</span>
-        </label>
-      ))}
+      {question.options.map((option) => {
+        const selected = value === option.id;
+        return (
+          <label
+            className={`flex cursor-pointer items-center gap-3 border ${selected ? "border-brand bg-brand-tint" : "border-line bg-surface-muted"} hover:bg-surface`}
+            style={{ borderRadius: 16, padding: 12, transitionDuration: "120ms", transitionTimingFunction: "var(--ease-dc)" }}
+            key={option.id}
+          >
+            <input
+              type="radio"
+              name={question.id}
+              value={option.id}
+              checked={selected}
+              disabled={disabled}
+              onChange={() => onChange(option.id)}
+            />
+            <span className="text-ink" style={{ fontSize: 13.5 }}><Markdown>{option.text}</Markdown></span>
+          </label>
+        );
+      })}
     </div>
   );
 }
 
 function TrueFalseInput({
+  question,
   value,
   disabled,
   onChange
 }: {
+  readonly question: { readonly id: string };
   readonly value: string;
   readonly disabled: boolean;
   readonly onChange: (value: string) => void;
@@ -487,23 +518,26 @@ function TrueFalseInput({
       {([
         ["true", "True"],
         ["false", "False"]
-      ] as const).map(([nextValue, label]) => (
-        <label
-          className="flex cursor-pointer items-center gap-3 border border-line bg-surface-muted hover:bg-surface"
-          style={{ borderRadius: 16, padding: 12, transitionDuration: "120ms", transitionTimingFunction: "var(--ease-dc)" }}
-          key={nextValue}
-        >
-          <input
-            type="radio"
-            name={`true-false-${label}`}
-            value={nextValue}
-            checked={value === nextValue}
-            disabled={disabled}
-            onChange={() => onChange(nextValue)}
-          />
-          <span className="text-ink" style={{ fontSize: 13.5 }}>{label}</span>
-        </label>
-      ))}
+      ] as const).map(([nextValue, label]) => {
+        const selected = value === nextValue;
+        return (
+          <label
+            className={`flex cursor-pointer items-center gap-3 border ${selected ? "border-brand bg-brand-tint" : "border-line bg-surface-muted"} hover:bg-surface`}
+            style={{ borderRadius: 16, padding: 12, transitionDuration: "120ms", transitionTimingFunction: "var(--ease-dc)" }}
+            key={nextValue}
+          >
+            <input
+              type="radio"
+              name={question.id}
+              value={nextValue}
+              checked={selected}
+              disabled={disabled}
+              onChange={() => onChange(nextValue)}
+            />
+            <span className="text-ink" style={{ fontSize: 13.5 }}>{label}</span>
+          </label>
+        );
+      })}
     </div>
   );
 }
@@ -565,13 +599,13 @@ function CorrectionDetails({
       {correction.questionType === "multiple-choice" && question.type === "multiple-choice" && (
         <>
           <p className="text-ink-soft">Correct answer: <strong>{optionText(question, correction.correctOptionId)}</strong></p>
-          <p className="mt-2 text-ink-mute">{correction.explanation}</p>
+          <div className="mt-2 text-ink-mute"><Markdown>{correction.explanation}</Markdown></div>
         </>
       )}
       {correction.questionType === "true-false" && (
         <>
           <p className="text-ink-soft">Correct answer: <strong>{correction.correctAnswer ? "True" : "False"}</strong></p>
-          <p className="mt-2 text-ink-mute">{correction.explanation}</p>
+          <div className="mt-2 text-ink-mute"><Markdown>{correction.explanation}</Markdown></div>
         </>
       )}
       {correction.questionType === "short-answer" && (

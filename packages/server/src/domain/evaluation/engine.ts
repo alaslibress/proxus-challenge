@@ -1,22 +1,33 @@
-import { Context, Effect, Layer } from "effect";
+import { Context, Effect, Layer, Stream } from "effect";
 import { LanguageModel } from "effect/unstable/ai";
-import { FinalFeedbackSchema, type AttemptEvaluationStage, type EnrichedFeedbackSchema } from "@proxus/shared";
+import { FinalFeedbackSchema, type AttemptEvaluationStage, type EnrichedFeedbackSchema, type PanelAgent, type PanelAgentOutcome } from "@proxus/shared";
 import { verifyCitations } from "../materials/citation.ts";
-import { EvaluationUnavailable, type EvaluationError } from "./errors.ts";
+import { EvaluationUnavailable, TeacherStreamEmpty, type EvaluationError } from "./errors.ts";
 import type { EvaluationTraceDraft } from "./trace.ts";
 import {
   goodTeacherPrompt,
   badTeacherPrompt,
   judgePrompt,
-  GOOD_TEACHER_SYSTEM_PROMPT,
-  BAD_TEACHER_SYSTEM_PROMPT,
-  JUDGE_SYSTEM_PROMPT,
+  goodTeacherSystemPrompt,
+  badTeacherSystemPrompt,
+  judgeSystemPrompt,
   type EvaluationInput
 } from "./prompts.ts";
 
 export type { EvaluationInput } from "./prompts.ts";
 
-const TEACHER_TIMEOUT_MS = 20_000;
+export type EvaluationProgressEvent =
+  | { readonly _tag: "stage"; readonly stage: AttemptEvaluationStage }
+  | {
+      readonly _tag: "reasoning";
+      readonly agent: PanelAgent;
+      readonly channel: "thought" | "text";
+      readonly delta: string;
+    };
+
+// 30 s, no 20: desde el PR-15 el timeout cubre también el backoff de los reintentos
+// (hasta ~3,5 s) además de la generación completa del profe.
+const TEACHER_TIMEOUT_MS = 30_000;
 
 /** Lo que devuelve `evaluate`: el veredicto que consume la UI, y el borrador de traza
  * con todo lo que el motor sabe y `review.ts` no puede reconstruir (texto de cada profe
@@ -29,7 +40,7 @@ export interface EvaluationResult {
 export interface EvaluationEngineService {
   readonly evaluate: (
     input: EvaluationInput,
-    emit?: (stage: AttemptEvaluationStage) => Effect.Effect<void>
+    emit?: (event: EvaluationProgressEvent) => Effect.Effect<void>
   ) => Effect.Effect<EvaluationResult, EvaluationError, LanguageModel.LanguageModel>;
 }
 
@@ -37,58 +48,104 @@ export const EvaluationEngineService = Context.Service<EvaluationEngineService>(
   "@proxus/server/evaluation/EvaluationEngineService"
 );
 
-const runTeacher = (systemPrompt: string, userPrompt: string) =>
-  LanguageModel.generateText({
-    prompt: [
-      { role: "system" as const, content: systemPrompt },
-      { role: "user" as const, content: userPrompt }
-    ],
-    toolChoice: "none" as const
-  }).pipe(
-    Effect.timeout(TEACHER_TIMEOUT_MS)
-  );
+/** Acumulador de un profe. Vive **fuera** del `Effect` a propósito: con
+ * `Effect.all(..., { mode: "result" })` un profe que falla se lleva por delante todo lo
+ * acumulado dentro del `Effect`, y el pensamiento parcial de un profe caído es justo el
+ * que más falta hace. Cada profe muta solo su propio objeto, así que el paralelismo
+ * sigue siendo seguro. */
+interface TeacherAccumulator {
+  text: string;
+  thought: string;
+}
+
+const runTeacher = (
+  agent: PanelAgent,
+  systemPrompt: string,
+  userPrompt: string,
+  acc: TeacherAccumulator,
+  emit?: (event: EvaluationProgressEvent) => Effect.Effect<void>
+) =>
+  Effect.gen(function* () {
+    yield* LanguageModel.streamText({
+      prompt: [
+        { role: "system" as const, content: systemPrompt },
+        { role: "user" as const, content: userPrompt }
+      ],
+      toolChoice: "none" as const
+    }).pipe(
+      Stream.runForEach((part) => {
+        if (part.type === "text-delta") {
+          acc.text += part.delta;
+          return emit?.({ _tag: "reasoning", agent, channel: "text", delta: part.delta })
+            ?? Effect.void;
+        }
+        if (part.type === "reasoning-delta") {
+          acc.thought += part.delta;
+          return emit?.({ _tag: "reasoning", agent, channel: "thought", delta: part.delta })
+            ?? Effect.void;
+        }
+        return Effect.void;
+      })
+    );
+    if (acc.text.trim().length === 0) {
+      return yield* new TeacherStreamEmpty({ message: "Teacher stream produced no text" });
+    }
+    return { text: acc.text };
+  }).pipe(Effect.timeout(TEACHER_TIMEOUT_MS));
 
 type TeacherResult =
   | { readonly _tag: "Success"; readonly success: { readonly text: string } }
   | { readonly _tag: "Failure"; readonly failure: unknown };
 
-const teacherOutcome = (
-  result: TeacherResult
-): { readonly ok: true; readonly text: string } | { readonly ok: false; readonly reason: string } =>
-  result._tag === "Success"
-    ? { ok: true, text: result.success.text }
-    : { ok: false, reason: String(result.failure) };
+const describeFailure = (result: TeacherResult & { _tag: "Failure" }): string => {
+  const s = String(result.failure);
+  if (s.includes("TimeoutException") || s.includes("timeout")) return `Timeout after ${TEACHER_TIMEOUT_MS / 1000}s`;
+  return s;
+};
+
+const teacherOutcome = (result: TeacherResult, acc: TeacherAccumulator): PanelAgentOutcome => {
+  // `exactOptionalPropertyTypes` está activo (GUIA-DOER §5): nunca asignes
+  // `thought: undefined`. O la clave existe con contenido, o no existe.
+  const thought = acc.thought.trim().length > 0 ? { thought: acc.thought } : {};
+  return result._tag === "Success"
+    ? { status: "ok", text: result.success.text, ...thought }
+    : { status: "failed", reason: describeFailure(result), ...thought };
+};
 
 const evaluate = (
   input: EvaluationInput,
-  emit?: (stage: AttemptEvaluationStage) => Effect.Effect<void>
+  emit?: (event: EvaluationProgressEvent) => Effect.Effect<void>
 ): Effect.Effect<EvaluationResult, EvaluationError, LanguageModel.LanguageModel> =>
   Effect.gen(function* () {
     const startedAt = Date.now();
 
     if (emit !== undefined) {
-      yield* emit("evaluating_good");
-      yield* emit("evaluating_bad");
+      yield* emit({ _tag: "stage", stage: "evaluating_good" });
+      yield* emit({ _tag: "stage", stage: "evaluating_bad" });
     }
+
+    const goodAcc: TeacherAccumulator = { text: "", thought: "" };
+    const badAcc: TeacherAccumulator = { text: "", thought: "" };
 
     const [goodResult, badResult] = yield* Effect.all(
       [
-        runTeacher(GOOD_TEACHER_SYSTEM_PROMPT, goodTeacherPrompt(input)),
-        runTeacher(BAD_TEACHER_SYSTEM_PROMPT, badTeacherPrompt(input))
+        runTeacher("good_teacher", goodTeacherSystemPrompt(input.mode), goodTeacherPrompt(input), goodAcc, emit),
+        runTeacher("bad_teacher", badTeacherSystemPrompt(input.mode), badTeacherPrompt(input), badAcc, emit)
       ],
       { concurrency: "unbounded", mode: "result" }
     );
 
     const good = goodResult._tag === "Success" ? goodResult.success.text : null;
     const bad = badResult._tag === "Success" ? badResult.success.text : null;
-    const goodTeacher = teacherOutcome(goodResult);
-    const badTeacher = teacherOutcome(badResult);
+    const goodTeacher = teacherOutcome(goodResult, goodAcc);
+    const badTeacher = teacherOutcome(badResult, badAcc);
 
     if (emit !== undefined) {
-      yield* emit("deliberating");
+      yield* emit({ _tag: "stage", stage: "deliberating" });
     }
 
     const traceBase = {
+      mode: input.mode,
       questionId: input.questionId,
       questionPrompt: input.questionPrompt,
       expectedAnswer: input.expectedAnswer,
@@ -102,7 +159,7 @@ const evaluate = (
 
     const judgeOutcome = yield* LanguageModel.generateObject({
       prompt: [
-        { role: "system" as const, content: JUDGE_SYSTEM_PROMPT },
+        { role: "system" as const, content: judgeSystemPrompt(input.mode) },
         { role: "user" as const, content: judgePrompt(input, { good, bad }) }
       ],
       schema: FinalFeedbackSchema,
@@ -129,13 +186,18 @@ const evaluate = (
       });
     }
 
-    const citas_pdf = verifyCitations(judgeOutcome.value.citas_pdf, input.evidence, input.materialId);
+    const citas_pdf = input.mode === "grounded" && input.materialId !== undefined
+      ? verifyCitations(judgeOutcome.value.citas_pdf, input.evidence, input.materialId)
+      : [];
 
     return {
       feedback: {
         is_correct: judgeOutcome.value.is_correct,
         feedback: judgeOutcome.value.feedback,
-        citas_pdf
+        citas_pdf,
+        grounded: input.mode === "grounded",
+        goodTeacher,
+        badTeacher
       },
       trace: {
         ...traceBase,

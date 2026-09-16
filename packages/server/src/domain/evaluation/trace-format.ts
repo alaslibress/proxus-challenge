@@ -27,10 +27,18 @@ const formatEvidence = (entry: EvaluationTraceEntry): string => {
   return `**Evidencia inyectada:** ${materialLabel}\n\n${body}`;
 };
 
+/** El pensamiento va **debajo** del veredicto y solo si existe con contenido: sin él la
+ * salida debe ser byte a byte la de siempre. Blockquote, como la evidencia: es prosa
+ * cruda del modelo, no texto del proyecto. */
+const formatThought = (teacher: EvaluationTraceEntry["goodTeacher"]): string =>
+  teacher.thought !== undefined && teacher.thought.trim().length > 0
+    ? `\n\n**Reasoning:**\n\n${blockquote(teacher.thought)}`
+    : "";
+
 const formatTeacher = (title: string, teacher: EvaluationTraceEntry["goodTeacher"]): string =>
-  teacher.ok
-    ? `### ${title}\n${teacher.text}`
-    : `### ${title}\n_No disponible: ${teacher.reason}_`;
+  teacher.status === "ok"
+    ? `### ${title}\n${teacher.text}${formatThought(teacher)}`
+    : `### ${title}\n_No disponible: ${teacher.reason}_${formatThought(teacher)}`;
 
 const formatJudge = (judge: EvaluationTraceEntry["judge"]): string => {
   if ("failed" in judge) {
@@ -61,6 +69,10 @@ const formatCitationsTable = (entry: EvaluationTraceEntry): string => {
 export const formatTraceEntry = (entry: EvaluationTraceEntry, timestamp: string): string => {
   const durationSeconds = (entry.durationMs / 1000).toFixed(1);
 
+  const evidenceLine = entry.mode === "grounded"
+    ? "- **Evidence: PDF page text**"
+    : `- **Evidence: none (conceptual grading)${entry.ungroundedWhy !== undefined ? ` — why: ${entry.ungroundedWhy}` : ""}**`;
+
   return `## Pregunta \`${entry.questionId}\` — ${timestamp} — ${durationSeconds}s
 
 **Enunciado:** ${entry.questionPrompt}
@@ -69,9 +81,9 @@ export const formatTraceEntry = (entry: EvaluationTraceEntry, timestamp: string)
 
 ${formatEvidence(entry)}
 
-${formatTeacher("Profe Bueno", entry.goodTeacher)}
+${formatTeacher("Good Teacher", entry.goodTeacher)}
 
-${formatTeacher("Profe Malo", entry.badTeacher)}
+${formatTeacher("Bad Teacher", entry.badTeacher)}
 
 ${formatJudge(entry.judge)}
 
@@ -85,6 +97,7 @@ ${formatCitationsTable(entry)}
       ? ` (${entry.citations.filter((citation) => citation.verified).length} cita${entry.citations.filter((citation) => citation.verified).length === 1 ? "" : "s"} verificada${entry.citations.filter((citation) => citation.verified).length === 1 ? "" : "s"})`
       : ""
   }
+${evidenceLine}
 `;
 };
 

@@ -17,8 +17,11 @@
     "@types/react": "^19.2.17",
     "@types/react-dom": "^19.2.3",
     "effect": "4.0.0-beta.83",
+    "katex": "^0.16.47",
     "react": "^19.2.7",
     "react-dom": "^19.2.7",
+    "rehype-katex": "^7.0.1",
+    "remark-math": "^6.0.0",
     "streamdown": "^2.5.0",
     "tailwindcss": "^4.3.1"
   },

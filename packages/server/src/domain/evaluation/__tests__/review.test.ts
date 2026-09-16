@@ -10,7 +10,7 @@ import type {
   TestArtifact
 } from "@proxus/shared";
 import { MaterialRepository, MaterialRepositoryError, type PageText } from "../../materials/material.ts";
-import { EvaluationEngineService } from "../engine.ts";
+import { EvaluationEngineService, type EvaluationInput } from "../engine.ts";
 import { EvaluationUnavailable } from "../errors.ts";
 import { EvaluationTrace, type EvaluationTraceEntry } from "../trace.ts";
 import { panelRaisesScore, reviewGradedAttempt } from "../review.ts";
@@ -68,8 +68,9 @@ const makeFakeEngine = (
     | { readonly kind: "succeed-no-citations"; readonly is_correct: boolean }
 ) =>
   Layer.succeed(EvaluationEngineService)({
-    evaluate: (input) => {
+    evaluate: (input: EvaluationInput) => {
       const traceBase = {
+        mode: input.mode,
         questionId: input.questionId,
         questionPrompt: input.questionPrompt,
         expectedAnswer: input.expectedAnswer,
@@ -77,8 +78,8 @@ const makeFakeEngine = (
         materialId: input.materialId,
         pages: input.pages,
         evidence: input.evidence,
-        goodTeacher: { ok: true as const, text: "bien" },
-        badTeacher: { ok: true as const, text: "mal" },
+        goodTeacher: { status: "ok" as const, text: "bien" },
+        badTeacher: { status: "ok" as const, text: "mal" },
         durationMs: 1
       };
 
@@ -96,12 +97,15 @@ const makeFakeEngine = (
         ) as unknown as ReturnType<EvaluationEngineService["evaluate"]>;
       }
 
+      const grounded = input.mode === "grounded";
+
       if (behavior.kind === "succeed-no-citations") {
         return Effect.succeed({
           feedback: {
             is_correct: behavior.is_correct,
             feedback: "Feedback consolidado del panel.",
-            citas_pdf: []
+            citas_pdf: [],
+            grounded
           },
           trace: {
             ...traceBase,
@@ -112,23 +116,26 @@ const makeFakeEngine = (
       }
 
       const verified = input.evidence.some((page) => page.text.includes(behavior.quote));
-      const citas_pdf = [
-        {
-          materialId: input.materialId,
-          page: verified ? input.evidence[0]?.page ?? 0 : 0,
-          quote: behavior.quote,
-          verified
-        }
-      ];
+      const citas_pdf = grounded
+        ? [
+            {
+              materialId: input.materialId,
+              page: verified ? input.evidence[0]?.page ?? 0 : 0,
+              quote: behavior.quote,
+              verified
+            }
+          ]
+        : [];
       return Effect.succeed({
         feedback: {
           is_correct: behavior.is_correct,
           feedback: "Feedback consolidado del panel.",
-          citas_pdf
+          citas_pdf,
+          grounded
         },
         trace: {
           ...traceBase,
-          judge: { is_correct: behavior.is_correct, feedback: "Feedback consolidado del panel.", citas_pdf: [behavior.quote] },
+          judge: { is_correct: behavior.is_correct, feedback: "Feedback consolidado del panel.", citas_pdf: grounded ? [behavior.quote] : [] },
           citations: citas_pdf
         }
       }) as unknown as ReturnType<EvaluationEngineService["evaluate"]>;
@@ -185,7 +192,7 @@ const run = (
 ) => Effect.runPromise(reviewGradedAttempt(artifact, attempt).pipe(Effect.provide(layers)));
 
 describe("reviewGradedAttempt", () => {
-  it("never fails even if the evaluation panel fails — returns the attempt unmodified", async () => {
+  it("never fails even if the evaluation panel fails — returns corrections with panel.ran: false", async () => {
     const layers = Layer.mergeAll(
       fakeTrace,
       makeFakeEngine({ kind: "fail" }),
@@ -193,9 +200,12 @@ describe("reviewGradedAttempt", () => {
       noLanguageModelNeeded
     );
 
-    const result = await run(testArtifact, gradedAttempt, layers);
+    const result = (await run(testArtifact, gradedAttempt, layers)) as GradedTestAttempt;
+    const correction = result.corrections[0] as ShortAnswerCorrection;
 
-    expect(result).toEqual(gradedAttempt);
+    // The attempt comes back with the same score (unmodified), but carries a panel status.
+    expect(correction.score).toBe(baseCorrection.score);
+    expect(correction.panel).toEqual({ ran: false, why: "judge-unavailable" });
   });
 
   it("raises the grade when the judge's citation is a verified literal quote from the extracted text", async () => {
@@ -216,6 +226,7 @@ describe("reviewGradedAttempt", () => {
     const correction = result.corrections[0] as ShortAnswerCorrection;
 
     expect(correction.score).toBe(shortAnswerQuestion.maxScore);
+    expect(correction.review?.grounded).toBe(true);
     expect(correction.review?.citas_pdf[0]?.verified).toBe(true);
   });
 
@@ -239,6 +250,7 @@ describe("reviewGradedAttempt", () => {
     // Grade stays at the deterministic value; only the (unverified) review is attached.
     expect(correction.score).toBe(baseCorrection.score);
     expect(correction.feedback).toBe(baseCorrection.feedback);
+    expect(correction.review?.grounded).toBe(true);
     expect(correction.review?.citas_pdf[0]?.verified).toBe(false);
   });
 
@@ -262,7 +274,7 @@ describe("reviewGradedAttempt", () => {
     expect(correction.score).toBe(baseCorrection.score);
   });
 
-  it("does NOT raise the grade when the panel says is_correct but cites nothing at all (citas_pdf: [])", async () => {
+  it("does NOT raise the grade when the panel says is_correct but cites nothing at all (citas_pdf: [], grounded mode)", async () => {
     const pageText = "La fotosíntesis convierte luz solar en energía química de forma continua.";
     const layers = Layer.mergeAll(
       fakeTrace,
@@ -278,6 +290,7 @@ describe("reviewGradedAttempt", () => {
     // diga que la respuesta es correcta (Tech Spec §5, exigencia nº2).
     expect(correction.score).toBe(baseCorrection.score);
     expect(correction.feedback).toBe(baseCorrection.feedback);
+    expect(correction.review?.grounded).toBe(true);
     expect(correction.review?.citas_pdf).toEqual([]);
   });
 
@@ -301,59 +314,114 @@ describe("reviewGradedAttempt", () => {
     expect(result).toEqual(ungraded);
   });
 
-  it("passes through unchanged when the artifact has no source (no materialId to fetch text from)", async () => {
+  it("runs the panel in ungrounded mode when the artifact has no source, and raises the score when the judge says is_correct", async () => {
     const artifactWithoutSource: TestArtifact = { ...testArtifact, source: undefined };
     const layers = Layer.mergeAll(
       fakeTrace,
-      makeFakeEngine({
-        kind: "succeed",
-        is_correct: true,
-        quote: "no importa",
-        evidenceText: "no importa"
-      }),
+      makeFakeEngine({ kind: "succeed-no-citations", is_correct: true }),
       makeFakeMaterialRepository({}),
       noLanguageModelNeeded
     );
 
     const result = (await run(artifactWithoutSource, gradedAttempt, layers)) as GradedTestAttempt;
+    const correction = result.corrections[0] as ShortAnswerCorrection;
 
-    expect(result.corrections[0]).toEqual(baseCorrection);
+    // The engine receives an ungrounded input.
+    const recorded = recordedTraces.find((t) => t.questionId === "q1" && t.mode === "ungrounded");
+    expect(recorded).toBeDefined();
+    expect(recorded?.mode).toBe("ungrounded");
+    expect(recorded?.evidence).toEqual([]);
+    expect(recorded?.pages).toEqual([]);
+    // In ungrounded mode, is_correct: true raises the score even without citations.
+    expect(correction.score).toBe(shortAnswerQuestion.maxScore);
+    expect(correction.review?.grounded).toBe(false);
   });
 
-  it("passes through unchanged when extractText fails for the material", async () => {
+  it("runs the panel in ungrounded mode when extractText fails, and raises the score when the judge says is_correct", async () => {
     const layers = Layer.mergeAll(
       fakeTrace,
-      makeFakeEngine({
-        kind: "succeed",
-        is_correct: true,
-        quote: "no importa",
-        evidenceText: "no importa"
-      }),
+      makeFakeEngine({ kind: "succeed-no-citations", is_correct: true }),
       makeFakeMaterialRepository({ fail: true }),
       noLanguageModelNeeded
     );
 
     const result = (await run(testArtifact, gradedAttempt, layers)) as GradedTestAttempt;
+    const correction = result.corrections[0] as ShortAnswerCorrection;
 
-    expect(result.corrections[0]).toEqual(baseCorrection);
+    const recorded = recordedTraces.find((t) => t.questionId === "q1" && t.mode === "ungrounded");
+    expect(recorded).toBeDefined();
+    expect(recorded?.evidence).toEqual([]);
+    expect(recorded?.pages).toEqual([]);
+    expect(correction.score).toBe(shortAnswerQuestion.maxScore);
+    expect(correction.review?.grounded).toBe(false);
   });
 
-  it("passes through unchanged when the extracted page text is blank (no extractable text layer)", async () => {
+  it("runs the panel in ungrounded mode when the extracted page text is blank, and raises the score when the judge says is_correct", async () => {
     const layers = Layer.mergeAll(
       fakeTrace,
-      makeFakeEngine({
-        kind: "succeed",
-        is_correct: true,
-        quote: "no importa",
-        evidenceText: ""
-      }),
+      makeFakeEngine({ kind: "succeed-no-citations", is_correct: true }),
       makeFakeMaterialRepository({ pages: [{ page: 1, text: "" }] }),
       noLanguageModelNeeded
     );
 
     const result = (await run(testArtifact, gradedAttempt, layers)) as GradedTestAttempt;
+    const correction = result.corrections[0] as ShortAnswerCorrection;
 
-    expect(result.corrections[0]).toEqual(baseCorrection);
+    const recorded = recordedTraces.find((t) => t.questionId === "q1" && t.mode === "ungrounded");
+    expect(recorded).toBeDefined();
+    expect(recorded?.evidence).toEqual([]);
+    expect(recorded?.pages).toEqual([]);
+    expect(correction.score).toBe(shortAnswerQuestion.maxScore);
+    expect(correction.review?.grounded).toBe(false);
+  });
+
+  it("panel status: grounded run → correction.panel = { ran: true, grounded: true }", async () => {
+    const pageText = "La fotosíntesis convierte luz solar en energía química.";
+    const layers = Layer.mergeAll(
+      fakeTrace,
+      makeFakeEngine({
+        kind: "succeed",
+        is_correct: true,
+        quote: "convierte luz solar en energía química",
+        evidenceText: pageText
+      }),
+      makeFakeMaterialRepository({ pages: [{ page: 1, text: pageText }] }),
+      noLanguageModelNeeded
+    );
+
+    const result = (await run(testArtifact, gradedAttempt, layers)) as GradedTestAttempt;
+    const correction = result.corrections[0] as ShortAnswerCorrection;
+
+    expect(correction.panel).toEqual({ ran: true, grounded: true });
+  });
+
+  it("panel status: no-source artifact → correction.panel = { ran: true, grounded: false, why: 'no-source' }", async () => {
+    const artifactWithoutSource: TestArtifact = { ...testArtifact, source: undefined };
+    const layers = Layer.mergeAll(
+      fakeTrace,
+      makeFakeEngine({ kind: "succeed-no-citations", is_correct: true }),
+      makeFakeMaterialRepository({}),
+      noLanguageModelNeeded
+    );
+
+    const result = (await run(artifactWithoutSource, gradedAttempt, layers)) as GradedTestAttempt;
+    const correction = result.corrections[0] as ShortAnswerCorrection;
+
+    expect(correction.panel).toEqual({ ran: true, grounded: false, why: "no-source" });
+  });
+
+  it("panel status: engine fails → correction.panel = { ran: false, why: 'judge-unavailable' }", async () => {
+    const layers = Layer.mergeAll(
+      fakeTrace,
+      makeFakeEngine({ kind: "fail" }),
+      makeFakeMaterialRepository({}),
+      noLanguageModelNeeded
+    );
+
+    const result = (await run(testArtifact, gradedAttempt, layers)) as GradedTestAttempt;
+    const correction = result.corrections[0] as ShortAnswerCorrection;
+
+    expect(correction.panel).toEqual({ ran: false, why: "judge-unavailable" });
   });
 });
 
@@ -369,27 +437,30 @@ describe("panelRaisesScore", () => {
     verified
   });
 
-  it("raises the score only when the judge says correct AND a citation is verified", () => {
+  it("raises the score (grounded) when the judge says correct AND a citation is verified", () => {
     expect(panelRaisesScore({
       is_correct: true,
       feedback: "Correcta.",
-      citas_pdf: [citation(true)]
+      citas_pdf: [citation(true)],
+      grounded: true
     })).toBe(true);
   });
 
-  it("does NOT raise the score when the judge says correct but no citation is verified", () => {
+  it("does NOT raise the score (grounded) when the judge says correct but no citation is verified", () => {
     expect(panelRaisesScore({
       is_correct: true,
       feedback: "Correcta según el juez, pero la cita es inventada.",
-      citas_pdf: [citation(false)]
+      citas_pdf: [citation(false)],
+      grounded: true
     })).toBe(false);
   });
 
-  it("does NOT raise the score when the judge says correct but cites nothing", () => {
+  it("does NOT raise the score (grounded) when the judge says correct but cites nothing", () => {
     expect(panelRaisesScore({
       is_correct: true,
       feedback: "Correcta sin citas.",
-      citas_pdf: []
+      citas_pdf: [],
+      grounded: true
     })).toBe(false);
   });
 
@@ -397,11 +468,30 @@ describe("panelRaisesScore", () => {
     expect(panelRaisesScore({
       is_correct: false,
       feedback: "Incompleta.",
-      citas_pdf: [citation(true)]
+      citas_pdf: [citation(true)],
+      grounded: true
     })).toBe(false);
   });
 
   it("does NOT raise the score when the panel produced no review at all", () => {
     expect(panelRaisesScore(undefined)).toBe(false);
+  });
+
+  it("raises the score (ungrounded) when the judge says is_correct: true, even with empty citas_pdf", () => {
+    expect(panelRaisesScore({
+      is_correct: true,
+      feedback: "Conceptually correct.",
+      citas_pdf: [],
+      grounded: false
+    })).toBe(true);
+  });
+
+  it("does NOT raise the score (ungrounded) when the judge says is_correct: false", () => {
+    expect(panelRaisesScore({
+      is_correct: false,
+      feedback: "Not correct.",
+      citas_pdf: [],
+      grounded: false
+    })).toBe(false);
   });
 });

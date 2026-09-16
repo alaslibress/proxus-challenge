@@ -104,6 +104,13 @@ En orden real de ejecución, no numérico.
 - **PR-07** — La UI enseña los tres agentes en vivo y las citas con su badge de verificación.
 - **PR-08** — Cierre de la suite de tests, evals sin API key y este README.
 
+**Mejoras post-entrega**
+
+- **PR-14** — Cuatro bugs de QA: el panel de 3 agentes siempre corre, el tutor conoce el ejercicio abierto, la agrupación de radio quedó rota, y el razonamiento de los profes se muestra en vivo.
+- **PR-15** — Reintentos con backoff exponencial y jitter en Gemini ante errores 408/429/5xx. Los mensajes de error dicen qué llamada falló.
+- **PR-16** — Cuatro bugs detectados en testing post-PR-14: `source` se omitía en los ejemplos del prompt (toda corrección salía "Graded without PDF evidence"), sin indicador de si el panel corrió o no, el razonamiento de los profes se perdía tras el streaming, y los prompts estaban harcodeados en inglés.
+- **PR-17** — El razonamiento de los profes deja de evaporarse: el motor lo acumula (incluso el parcial de un profe caído), viaja en el intento persistido y se relee desde el modal; en vivo el transcript ya no se desmonta al terminar la etapa y guarda el historial por pregunta.
+
 ### Por qué hay un PR-1.5
 
 Con el PR-01 mergeado y antes de empezar la fase 2 me di cuenta de que faltaba una pieza
@@ -164,11 +171,11 @@ Las piezas, y dónde están:
 
 | Pieza | Dónde | Qué hace |
 |---|---|---|
-| Evidencia | `domain/materials/material.ts` (`extractText`), `PdfService` | `pdftotext` sobre las páginas que la pregunta declara (`sourcePage`, o el `source` del artefacto). Sin evidencia, el panel no se llama. |
+| Evidencia | `domain/materials/material.ts` (`extractText`), `PdfService` | `pdftotext` sobre las páginas que la pregunta declara (`sourcePage`, o el `source` del artefacto). Si el artefacto no tiene `source` o el material no es accesible, el panel corre igualmente en modo `ungrounded` (sin evidencia inyectada). |
 | Los dos profes | `domain/evaluation/engine.ts:74-80` | `Effect.all([bueno, malo], { concurrency: "unbounded", mode: "result" })`. Concurrentes, y **`mode: "result"` nunca falla**: si uno cae, el Juez recibe su crítica como no disponible y sigue. Degradación estructural, no `try/catch`. |
 | El Juez | `domain/evaluation/engine.ts:103-115` | `LanguageModel.generateObject` con `FinalFeedbackSchema`. Salida estructurada nativa: `gemini.ts:242-247` manda `responseMimeType: "application/json"` + `responseSchema`. |
 | Verificación de citas | `domain/materials/citation.ts` | Cada `cita_pdf` del Juez se busca literalmente (normalizada) en el texto de la página. Sale como `PdfCitation` con `verified` y su página, o `verified: false` sin página. |
-| **La regla que lo cierra** | `domain/evaluation/review.ts:72-76` (`panelRaisesScore`), aplicada en `review.ts:164` | `is_correct` **y** al menos una cita `verified` → `maxScore`; en cualquier otro caso, la nota determinista. La regla se exporta para que `panel:check` informe exactamente lo mismo que aplica el motor. |
+| **La regla que lo cierra** | `domain/evaluation/review.ts:72-76` (`panelRaisesScore`), aplicada en `review.ts:164` | **Grounded**: `is_correct` **y** al menos una cita `verified` → `maxScore`. **Ungrounded**: solo `is_correct` basta (no hay citas que verificar). En cualquier otro caso, la nota determinista. La regla se exporta para que `panel:check` informe exactamente lo mismo que aplica el motor. |
 | Transporte | `transport/http/server.ts:68-109` + `packages/web/src/lib/ndjson.ts` | NDJSON con fases discretas (`evaluating_good`, `evaluating_bad`, `deliberating`) y un `done` terminal siempre. El lector salta las líneas que no decodifican en vez de reventar. |
 | Traza | `domain/evaluation/trace.ts`, `trace-format.ts` | Markdown por intento en `.data/sessions/<attemptId>.md`, escrito con `Effect.forkDetach` fuera del camino crítico. |
 
@@ -200,40 +207,37 @@ modelo retirado (`gemini-2.5-flash` ya devuelve **404 "no longer available to ne
 degrada todo el panel a la nota determinista sin que nada más se rompa — es el mismo
 comportamiento que la tabla de degradaciones de más abajo.
 
-**Coloca un PDF con capa de texto** (apuntes exportados, no un escaneo) donde el server los
-busca. Ese directorio **no existe en un checkout limpio** y sin él nada de la parte de
-citas funciona:
-
-```bash
-mkdir -p packages/server/.data/materials/pdfs
-cp ~/apuntes-biologia.pdf packages/server/.data/materials/pdfs/
-```
-
-El id del material es el nombre del fichero sin `.pdf`. También puedes subirlo desde la UI
-arrastrándolo al sidebar.
-
 ```bash
 pnpm run dev      # server :3000 + web :5173
 ```
 
-Abre <http://localhost:5173> y:
+Abre <http://localhost:5173>. El panel funciona **con o sin PDF**:
 
-1. Comprueba que el sidebar lista tu PDF entre los materiales.
+**Sin PDF (modo ungrounded, más rápido de probar):**
+1. Pídele al tutor: *"crea un test con dos preguntas de respuesta corta sobre fotosíntesis"*.
+2. Abre el artefacto y responde: **una paráfrasis correcta** y **una equivocada**. Envía.
+3. Mientras evalúa verás el panel: **Good Teacher** y **Bad Teacher** activos a la vez
+   (con su razonamiento en vivo), después **Judge deliberating**, y el contador *"Question N of Y"*.
+4. En el resultado, por cada respuesta corta: el feedback del Juez. Como no hay PDF de
+   referencia, aparece el aviso de evaluación orientativa.
+
+**Con PDF (modo grounded, verifica las citas):**
+1. Sube un PDF con capa de texto (apuntes exportados, no un escaneo) desde el sidebar o:
+   ```bash
+   mkdir -p packages/server/.data/materials/pdfs
+   cp ~/apuntes-biologia.pdf packages/server/.data/materials/pdfs/
+   ```
 2. Pídele al tutor: *"crea un test con tres preguntas de respuesta corta sobre la página 2
    de \<tu material\>"*.
-3. Abre el artefacto en el workspace y responde: **una paráfrasis correcta** (con tus
-   palabras, sin copiar), **una equivocada** y **una en blanco**. Envía.
-4. Mientras evalúa verás el panel: **Profe Bueno** y **Profe Malo** activos a la vez,
-   después **Juez deliberando**, y el contador *"Pregunta N de M"*.
-5. En el resultado, por cada respuesta corta:
+3. Abre el artefacto y responde: **una paráfrasis correcta**, **una equivocada** y **una en
+   blanco**. Envía.
+4. En el resultado, por cada respuesta corta:
    - la **paráfrasis correcta** debería puntuar con el feedback del Juez y una cita
-     marcada `verified` con su número de página. Abre el PDF por esa página y comprueba que
-     el texto está ahí, literal;
-   - una cita **no verificada** sale visualmente distinta, con *"Sin verificar en el PDF"* y
-     **sin** número de página;
-   - si ninguna cita se verificó, aparece el aviso *"Evaluación orientativa: no se pudo
-     verificar ninguna cita, la nota es la automática."*.
-6. Abre `packages/server/.data/sessions/<attemptId>.md` y contrasta: está todo lo que dijo
+     "Verified · … · p. N". Abre el PDF por esa página y comprueba que el texto está ahí;
+   - una cita **no verificada** sale con "Not verified against the PDF" y sin número de página;
+   - si ninguna cita se verificó, aparece "Advisory evaluation: no citation could be verified,
+     so the automatic mark stands."
+5. Abre `packages/server/.data/sessions/<attemptId>.md` y contrasta: está todo lo que dijo
    cada profe, el JSON del Juez y la tabla de citas.
 
 ### Degradaciones que merece la pena provocar
@@ -241,7 +245,7 @@ Abre <http://localhost:5173> y:
 | Provocación | Comportamiento esperado |
 |---|---|
 | `GEMINI_MODEL` apuntando a un modelo inexistente | Sale la corrección determinista, sin `review`, sin romper el layout. |
-| PDF escaneado sin capa de texto | El panel no se llama; nota determinista y la traza lo deja escrito. |
+| PDF escaneado sin capa de texto | `pdftotext` devuelve vacío; el panel corre en modo `ungrounded` y la traza lo registra. |
 | `pdftotext` fuera del `PATH` | El arranque falla rápido, con mensaje claro. |
 | Endpoint de streaming caído | El envío sigue funcionando por la ruta tipada (`submitArtifactAttemptAction`), sin panel de progreso. |
 
@@ -253,7 +257,7 @@ Todos sobre este árbol, con sus resultados reales:
 
 ```bash
 pnpm run typecheck        # los cuatro paquetes, sin errores
-pnpm run test             # 17 ficheros, 151 tests (server 14/131, web 3/20)
+pnpm run test             # 26 ficheros, 235 tests (server 19/189, web 7/46)
 pnpm --filter @proxus/web run build   # ~0,6 s (aviso de chunk >500 kB, preexistente)
 ```
 
@@ -275,25 +279,30 @@ el sistema con ello. Cubren, entre otras cosas:
   (`artifact-schema.test.ts`, 5 casos).
 
 Además, la suite se ha comprobado **rompiéndola a propósito**: relajando
-`panelRaisesScore` (`review.ts:72-76`) para que la nota suba con `is_correct` a secas
-—es decir, quitando la exigencia de cita `verified`— se ponen en rojo **exactamente 5
-tests**, todos en `review.test.ts`. Cifra comprobada ejecutando `npm test` con la mutación
-puesta (5 failed | 126 passed) y revirtiéndola después (151/151 en verde):
+`panelRaisesScore` (`domain/evaluation/review.ts`) para que la nota suba con `is_correct` a
+secas —es decir, quitando la exigencia de cita `verified` en modo `grounded`— se ponen en
+rojo **cinco tests**, todos en `review.test.ts`. La medición está repetida sobre la rama
+actual el 16-sep-2026: con la mutación puesta, `pnpm --filter @proxus/server run test` da
+`Test Files 1 failed | 18 passed (19)` y `Tests 5 failed | 184 passed (189)`; al revertirla,
+vuelve a `19 passed (19)` y `189 passed (189)`. Los cinco en rojo, copiados de la salida de
+vitest:
 
 - `reviewGradedAttempt › does NOT raise the grade when the citation is
   invented/unverifiable against the real text`
 - `reviewGradedAttempt › does NOT raise the grade when the panel says is_correct but the
   citation is unverified`
 - `reviewGradedAttempt › does NOT raise the grade when the panel says is_correct but cites
-  nothing at all (citas_pdf: [])`
-- `panelRaisesScore › does NOT raise the score when the judge says correct but no citation
-  is verified`
-- `panelRaisesScore › does NOT raise the score when the judge says correct but cites
-  nothing`
+  nothing at all (citas_pdf: [], grounded mode)`
+- `panelRaisesScore › does NOT raise the score (grounded) when the judge says correct but
+  no citation is verified`
+- `panelRaisesScore › does NOT raise the score (grounded) when the judge says correct but
+  cites nothing`
 
-Los otros tres casos de `describe("panelRaisesScore")` siguen verdes, y así debe ser:
-cubren la dirección contraria de la regla (correcta + cita verificada **sí** sube;
-incorrecta con cita verificada no sube; sin panel no sube), que la mutación no toca.
+De los **siete** casos que tiene hoy `describe("panelRaisesScore")`, la mutación tumba dos
+y los otros cinco siguen verdes, y así debe ser: cubren la dirección contraria de la regla
+(correcta + cita verificada **sí** sube; incorrecta con cita verificada no sube; sin panel
+no sube) y los dos del modo `ungrounded`, donde la regla ya sólo exige `is_correct` y por
+tanto la mutación no los toca.
 Una suite que no puede ponerse roja no vale nada.
 
 ### Checks contra Gemini de verdad
@@ -391,13 +400,13 @@ reimplementando por su cuenta una regla que el motor tiene más estricta: la not
 si el Juez la da por correcta **y** al menos una cita quedó `verified`. Una demo que dice
 "nota modificada por el panel" cuando el producto no la habría modificado es peor que no
 tener demo. El arreglo no es parchear el script: la regla se extrae a `panelRaisesScore`
-(`domain/evaluation/review.ts:72-76`), el motor la usa (`review.ts:164`) y el script la
+(`domain/evaluation/review.ts:58-63`), el motor la usa (`review.ts:142`) y el script la
 importa, así que no pueden volver a divergir.
 
 Test: `packages/server/src/domain/evaluation/__tests__/review.test.ts` gana un
 `describe("panelRaisesScore")` con 5 casos —correcta + cita verificada sube; correcta con
 cita sin verificar no sube; correcta sin citas no sube; incorrecta con cita verificada no
-sube; sin panel no sube—. Se prueba la función directamente porque `panel.check.ts` es un
+sube; sin panel no sube—. Hoy son siete: los dos del modo `ungrounded` llegaron después. Se prueba la función directamente porque `panel.check.ts` es un
 ejecutable con `argv` y no se puede invocar desde vitest.
 
 ## 5. Qué haría después
@@ -541,8 +550,8 @@ Las decisiones incómodas, dichas en voz alta.
   `Schema.fromJsonString`. Lo único que faltaba era que el adaptador honrase
   `responseFormat` (`gemini.ts:242-247`): ~15 líneas en vez de una capa nueva.
 - **Se usa vitest pese a que `CHALLENGE.md` desaconseja frameworks nuevos.** El criterio de
-  *"capacidad de evaluación"* se responde mucho mejor con 151 tests deterministas que
-  corren sin API key que con un script Effect a mano, que ya no escalaba más allá de un
+  *"capacidad de evaluación"* se responde mucho mejor con cientos de tests deterministas
+  que corren sin API key que con un script Effect a mano, que ya no escalaba más allá de un
   dataset. El coste es una devDependency por paquete y ninguna línea de producción.
 
 ## Dónde mirar para auditar
@@ -668,12 +677,13 @@ documentacion/            # Documentación de esta entrega
   adr-02-evaluacion-transporte-observabilidad.md   # ADR-02: transporte y trazabilidad
   design-system.md              # Tokens de color y tipografía; norma para toda UI
 
-planes/                   # Un plan por PR, 16 en total: PR-01 → PR-08 son el roadmap de
+planes/                   # Un plan por PR, 19 en total: PR-01 → PR-08 son el roadmap de
                           # esta entrega; PR-09 → PR-13 son producto y bugs añadidos
                           # después e intercalados al principio (PR-12.1 y PR-12.2 son
                           # las dos iteraciones que hicieron falta para cerrar el PR-12);
-                          # y PR-1.5 es el sistema visual, hallazgo de la primera fase
-                          # resuelto justo detrás del PR-01. Ver §0.
+                          # PR-14 → PR-17 son mejoras post-entrega; y PR-1.5 es el sistema
+                          # visual, hallazgo de la primera fase resuelto justo detrás del
+                          # PR-01. Ver §0.
   plan.md                       # Plan general: tabla de PRs, estado y dependencias
   GUIA-DOER.md                  # Entorno, orden de los PRs y trampas del repo
 ```
