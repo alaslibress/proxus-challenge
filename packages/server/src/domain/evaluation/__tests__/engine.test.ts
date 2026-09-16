@@ -1,17 +1,19 @@
 import { describe, it, expect } from "vitest";
-import { Data, Effect, Layer } from "effect";
-import { AiError, LanguageModel } from "effect/unstable/ai";
-import { EvaluationEngineService, EvaluationEngineServiceLive, type EvaluationInput } from "../engine.ts";
+import { Data, Effect, Layer, Stream } from "effect";
+import { AiError, LanguageModel, Response } from "effect/unstable/ai";
+import { EvaluationEngineService, EvaluationEngineServiceLive, type EvaluationInput, type EvaluationProgressEvent } from "../engine.ts";
 
 class FakeModelError extends Data.TaggedError("FakeModelError")<{ readonly reason: string }> {}
 
 // A fake LanguageModel avoids depending on real Gemini credentials: text/object
 // generation is entirely under the test's control here, mirroring the fake PdfService
 // pattern used in file-material-repository.test.ts.
-const textResponse = (text: string) => ({
-  content: [{ type: "text" as const, text }],
-  text
-});
+const teacherStream = (text: string): Stream.Stream<Response.StreamPartEncoded> =>
+  Stream.make(
+    { type: "text-start" as const, id: "text" } as Response.StreamPartEncoded,
+    { type: "text-delta" as const, id: "text", delta: text } as Response.StreamPartEncoded,
+    { type: "text-end" as const, id: "text" } as Response.StreamPartEncoded
+  );
 
 const makeFakeLanguageModel = (options: {
   readonly goodText?: string;
@@ -22,22 +24,10 @@ const makeFakeLanguageModel = (options: {
   readonly failJudge?: boolean;
   /** El Juez devolvió texto que no decodifica contra FinalFeedbackSchema (PR-08). */
   readonly failJudgeWithMalformedJson?: boolean;
-  readonly onGenerateText?: (systemPrompt: string) => void;
+  readonly onStreamText?: (systemPrompt: string) => void;
 }) =>
   Layer.succeed(LanguageModel.LanguageModel)({
-    generateText: ((params: { readonly prompt: readonly { readonly role: string; readonly content: string }[] }) => {
-      const systemPrompt = params.prompt[0]?.content ?? "";
-      options.onGenerateText?.(systemPrompt);
-      const isGood = systemPrompt.includes("Profe Bueno");
-      if (isGood && options.failGood === true) {
-        return Effect.fail(new FakeModelError({ reason: "good teacher failed" }));
-      }
-      if (!isGood && options.failBad === true) {
-        return Effect.fail(new FakeModelError({ reason: "bad teacher failed" }));
-      }
-      const text = isGood ? options.goodText ?? "buena respuesta" : options.badText ?? "mala respuesta";
-      return Effect.succeed(textResponse(text));
-    }) as unknown as LanguageModel.Service["generateText"],
+    generateText: (() => Effect.die("teachers now use streamText")) as unknown as LanguageModel.Service["generateText"],
     generateObject: (() => {
       if (options.failJudgeWithMalformedJson === true) {
         // Es exactamente lo que produce generateObject cuando el modelo devuelve JSON que
@@ -59,7 +49,19 @@ const makeFakeLanguageModel = (options: {
         value
       });
     }) as unknown as LanguageModel.Service["generateObject"],
-    streamText: (() => Effect.die("not used")) as unknown as LanguageModel.Service["streamText"]
+    streamText: ((params: { readonly prompt: readonly { readonly role: string; readonly content: string }[] }) => {
+      const systemPrompt = params.prompt[0]?.content ?? "";
+      options.onStreamText?.(systemPrompt);
+      const isGood = systemPrompt.includes("Good Teacher");
+      if (isGood && options.failGood === true) {
+        return Stream.fail(new FakeModelError({ reason: "good teacher failed" }));
+      }
+      if (!isGood && options.failBad === true) {
+        return Stream.fail(new FakeModelError({ reason: "bad teacher failed" }));
+      }
+      const text = isGood ? options.goodText ?? "buena respuesta" : options.badText ?? "mala respuesta";
+      return teacherStream(text);
+    }) as unknown as LanguageModel.Service["streamText"]
   });
 
 const baseInput: EvaluationInput = {
@@ -67,6 +69,7 @@ const baseInput: EvaluationInput = {
   questionPrompt: "¿Qué es la fotosíntesis?",
   expectedAnswer: "El proceso por el cual las plantas convierten luz en energía.",
   studentAnswer: "Las plantas usan la luz para producir energía.",
+  mode: "grounded",
   materialId: "mat-1",
   pages: [1],
   evidence: [{ page: 1, text: "La fotosíntesis es el proceso por el cual las plantas convierten luz solar en energía química." }]
@@ -120,14 +123,14 @@ describe("EvaluationEngineService.evaluate", () => {
     const model = makeFakeLanguageModel({
       failGood: true,
       judgeValue: { is_correct: false, feedback: "Falta precisión.", citas_pdf: [] },
-      onGenerateText: (systemPrompt) => seenSystemPrompts.push(systemPrompt)
+      onStreamText: (systemPrompt) => seenSystemPrompts.push(systemPrompt)
     });
 
     const result = await Effect.runPromise(runEvaluate(baseInput, model));
 
     // Both teachers were attempted (good failed, bad succeeded) and the judge still ran.
-    expect(seenSystemPrompts.some((prompt) => prompt.includes("Profe Bueno"))).toBe(true);
-    expect(seenSystemPrompts.some((prompt) => prompt.includes("Profe Malo"))).toBe(true);
+    expect(seenSystemPrompts.some((prompt) => prompt.includes("Good Teacher"))).toBe(true);
+    expect(seenSystemPrompts.some((prompt) => prompt.includes("Bad Teacher"))).toBe(true);
     expect(result.feedback.is_correct).toBe(false);
     expect(result.feedback.feedback).toBe("Falta precisión.");
   });
@@ -180,5 +183,102 @@ describe("EvaluationEngineService.evaluate", () => {
     const result = await Effect.runPromise(runEvaluate(baseInput, model));
 
     expect(result.feedback.citas_pdf).toEqual([]);
+  });
+
+  it("streaming: text deltas arrive at emit with correct agent and in order, accumulated text equals concatenation", async () => {
+    const receivedEvents: EvaluationProgressEvent[] = [];
+    const model = makeFakeLanguageModel({
+      goodText: "good-delta",
+      badText: "bad-delta"
+    });
+
+    await Effect.runPromise(
+      Effect.gen(function* () {
+        const engine = yield* EvaluationEngineService;
+        return yield* engine.evaluate(baseInput, (event) => Effect.sync(() => { receivedEvents.push(event); }));
+      }).pipe(Effect.provide(Layer.mergeAll(EvaluationEngineServiceLive, model)))
+    );
+
+    const textDeltas = receivedEvents.filter(
+      (e): e is Extract<EvaluationProgressEvent, { _tag: "reasoning" }> => e._tag === "reasoning" && e.channel === "text"
+    );
+    const goodDeltas = textDeltas.filter((e) => e.agent === "good_teacher");
+    const badDeltas = textDeltas.filter((e) => e.agent === "bad_teacher");
+
+    expect(goodDeltas.map((e) => e.delta).join("")).toBe("good-delta");
+    expect(badDeltas.map((e) => e.delta).join("")).toBe("bad-delta");
+  });
+
+  it("streaming: a teacher whose stream emits no text is treated as failed (fallback to No disponible)", async () => {
+    // A stream with no text-delta parts should fail runTeacher
+    const model = Layer.succeed(LanguageModel.LanguageModel)({
+      generateText: (() => Effect.die("not used")) as unknown as LanguageModel.Service["generateText"],
+      generateObject: (() => {
+        const value = { is_correct: true, feedback: "judge ok", citas_pdf: [] };
+        return Effect.succeed({ content: [], text: "", value });
+      }) as unknown as LanguageModel.Service["generateObject"],
+      streamText: (() => Stream.empty) as unknown as LanguageModel.Service["streamText"]
+    });
+
+    const result = await Effect.runPromise(runEvaluate(baseInput, model));
+
+    // Judge still runs (mode: result tolerates teacher failure), result has a trace
+    expect(result.trace.goodTeacher.status).toBe("failed");
+    expect(result.trace.badTeacher.status).toBe("failed");
+  });
+
+  it("in ungrounded mode: does not call verifyCitations, returns citas_pdf: [] and grounded: false", async () => {
+    const model = makeFakeLanguageModel({
+      judgeValue: {
+        is_correct: true,
+        feedback: "Conceptually correct.",
+        citas_pdf: ["this quote should be ignored"]
+      }
+    });
+
+    const ungroundedInput: EvaluationInput = {
+      ...baseInput,
+      mode: "ungrounded",
+      materialId: undefined,
+      pages: [],
+      evidence: []
+    };
+
+    const result = await Effect.runPromise(runEvaluate(ungroundedInput, model));
+
+    expect(result.feedback.grounded).toBe(false);
+    expect(result.feedback.citas_pdf).toEqual([]);
+    expect(result.feedback.is_correct).toBe(true);
+  });
+
+  it("with both teachers OK, feedback includes goodTeacher and badTeacher with status ok", async () => {
+    const model = makeFakeLanguageModel({
+      goodText: "Well supported.",
+      badText: "Missing nuance.",
+      judgeValue: { is_correct: true, feedback: "Correct.", citas_pdf: [] }
+    });
+
+    const result = await Effect.runPromise(runEvaluate(baseInput, model));
+
+    const goodT = result.feedback.goodTeacher;
+    const badT = result.feedback.badTeacher;
+    expect(goodT?.status).toBe("ok");
+    expect(goodT?.status === "ok" ? goodT.text : undefined).toBe("Well supported.");
+    expect(badT?.status).toBe("ok");
+    expect(badT?.status === "ok" ? badT.text : undefined).toBe("Missing nuance.");
+  });
+
+  it("with bad teacher failing, badTeacher has status failed and judge still runs", async () => {
+    const model = makeFakeLanguageModel({
+      failBad: true,
+      goodText: "solid argument",
+      judgeValue: { is_correct: true, feedback: "judge ok", citas_pdf: [] }
+    });
+
+    const result = await Effect.runPromise(runEvaluate(baseInput, model));
+
+    expect(result.feedback.goodTeacher?.status).toBe("ok");
+    expect(result.feedback.badTeacher?.status).toBe("failed");
+    expect(result.feedback.is_correct).toBe(true);
   });
 });

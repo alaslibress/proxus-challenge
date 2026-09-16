@@ -29,14 +29,13 @@ pnpm --filter @proxus/web run test         # sólo frontend
 pnpm --filter @proxus/server run test:watch
 ```
 
-Resultado actual: **17 ficheros, 151 tests, todos en verde** (server 14/131, web 3/20).
+Resultado actual: **25 ficheros, 222 tests, todos en verde** (server 19/182, web 6/40).
 
 Cubren el motor de evaluación y su degradación cuando un profe o el Juez caen, la
 verificación literal de citas, el formato de la traza Markdown, el purgado de schemas para
-Gemini, el lector NDJSON del navegador y el stream de evaluación.
+Gemini, el lector NDJSON del navegador, el stream de evaluación y el estado del panel.
 
-Los dos ficheros más recientes salieron de sendos bugs cazados en la QA de cierre, y son
-los que hay que mirar primero si se toca el harness o el schema de artifacts:
+Ficheros clave por área — mirar primero si se toca lo que protegen:
 
 - `packages/server/src/domain/agents/harness/__tests__/session-step-budget.test.ts`
   (**4 tests**). Con un `LanguageModel` falso que guioniza cuatro turnos que sólo llaman
@@ -52,6 +51,17 @@ los que hay que mirar primero si se toca el harness o el schema de artifacts:
   con los tres tipos de pregunta, escrito tal y como lo documenta la skill
   `create-study-artifacts`, decodifica entero. Este último es el que ata la documentación
   del agente al schema: si se separan, se pone rojo.
+- `packages/server/src/domain/evaluation/__tests__/prompts.test.ts` (**2 tests**, PR-16).
+  Recorre los seis system-prompts (Good Teacher, Bad Teacher y Judge × 2 modos) y
+  verifica que ninguno contiene "in English" y que todos incluyen la regla de idioma.
+  Si alguien reintroduce el hardcode en inglés, se pone rojo.
+- `packages/server/src/domain/evaluation/__tests__/schema-retrocompat.test.ts` (**3 tests**,
+  PR-16). Decodifica `ShortAnswerCorrection` sin los campos nuevos `panel`, `goodTeacher` y
+  `badTeacher`: garantiza que los intentos grabados antes de PR-16 siguen siendo legibles.
+- `packages/web/src/domain/artifacts/__tests__/panel-status.test.ts` (**7 tests**, PR-16).
+  Cubre los tres variantes de `PanelStatus` más el caso `undefined`, y los cuatro valores
+  de `why` en modo `ran+ungrounded`. Si se añade un nuevo `why`, falla hasta que se añade
+  su case en `panel-status.ts`.
 
 Lo que **no** cubren: la calidad de los prompts. Ante una respuesta X del Juez garantizan
 que el sistema hace Y; para saber si el Juez acierta hay que ejecutar la eval con LLM real
@@ -162,24 +172,40 @@ la nota se queda en la determinista. La ruta de degradación es real, no sólo d
    - aparece la marca `Stopped` y no hay error ni `Retry`,
    - en la consola del server, el `http.span` cierra en ese instante y no llegan más
      `agent.step` de ese turno.
-10. Flujo de respuesta corta con panel (PR-07, requiere un PDF con capa de texto en
-    `packages/server/.data/materials/pdfs/`):
-    - Pide al tutor un **test** con tres preguntas de respuesta corta de la misma página.
+10. Flujo de respuesta corta con panel (PR-07 + PR-14). **El panel ya no requiere PDF**;
+    funciona en modo `ungrounded` para cualquier test, incluso sin material subido:
+    - Pide al tutor un **test** con al menos dos preguntas de respuesta corta. Si tienes
+      un PDF con capa de texto en `packages/server/.data/materials/pdfs/`, pide que
+      el test salga de él (modo `grounded`); si no, cualquier test sirve (`ungrounded`).
     - Responde: una paráfrasis correcta, una equivocada y una en blanco. Envía.
-    - Observa el panel de progreso: **Profe Bueno** y **Profe Malo** activos a la vez,
-      luego **Juez deliberando**, y el contador *"Pregunta N de M"* avanzando. Sin barras
-      de progreso ni porcentajes.
-    - Pulsa **Cancelar** en mitad de otro envío: el formulario vuelve a ser editable y no
+    - Observa el panel de progreso: **Good Teacher** y **Bad Teacher** activos a la vez
+      (etiquetas en inglés), luego **Judge deliberating**, y el contador *"Question N of Y"*
+      avanzando. Sin barras de progreso ni porcentajes.
+    - Mientras Good Teacher o Bad Teacher están activos, comprueba el **transcript en
+      vivo**: un panel con scroll automático muestra primero el canal `thought` (en
+      itálica) y después el canal `text` actualizándose carácter a carácter.
+    - Pulsa **Cancel** en mitad de otro envío: el formulario vuelve a ser editable y no
       queda ningún estado colgado (ni `isSubmitting`, ni error fantasma).
     - Al terminar, revisa por cada `short-answer`: el feedback razonado del Juez, y sus
       citas.
-    - Comprueba las citas:
-      - una `verified: true` sale con su página, contrástala abriendo el PDF por esa
-        página;
-      - una `verified: false` sale visualmente distinta (color e icono distintos) con el
-        texto *"Sin verificar en el PDF"* y **sin número de página**.
-      - si ninguna cita quedó verificada, aparece el aviso *"Evaluación orientativa: no
-        se pudo verificar ninguna cita, la nota es la automática."*.
+    - Comprueba el **indicador del panel** (`PanelIndicator`) encima del feedback:
+      - **`ran: true, grounded: true`** (PDF leído): etiqueta "Advanced reasoning ·
+        grounded in the PDF".
+      - **`ran: true, grounded: false`** (sin evidencia): etiqueta "Advanced reasoning ·
+        no PDF evidence" con detalle del motivo (`no-source`, `no-pages`, etc.).
+      - **`ran: false`** (motor caído): etiqueta "Advanced reasoning unavailable · automatic
+        mark stands".
+    - Si hay texto de algún profe, aparece el botón **"See the panel debate"**. Púlsalo y
+      verifica que el modal muestra las secciones Good Teacher, Bad Teacher y Judge, con el
+      texto o el motivo de fallo de cada uno, y las citas del Juez.
+    - Comprueba las citas según el modo:
+      - **grounded**: una cita `verified: true` sale con "Verified · … · p. N";
+        una `verified: false` sale visualmente distinta con "Not verified against the PDF"
+        y sin número de página. Si ninguna queda verificada, aparece "Advisory evaluation:
+        no citation could be verified, so the automatic mark stands."
+      - **ungrounded** (sin fuente): aparece el aviso "Advisory evaluation: no citation
+        could be verified, so the automatic mark stands." junto con la nota de que el
+        panel juzgó contra la respuesta esperada sin evidencia PDF.
     - Con `GEMINI_MODEL` apuntando a un modelo inexistente, repite el envío: debe salir
       la corrección determinista sin `review` y sin romper el layout.
     - Con el endpoint de streaming caído (o inaccesible), el envío debe seguir
@@ -189,6 +215,8 @@ la nota se queda en la determinista. La ruta de degradación es real, no sólo d
       siempre: no pasan por el panel.
     - Un artifact `test` creado antes de PR-04 (sin `source`, sin `review` posible) se
       corrige y se renderiza sin huecos ni errores.
+    - **Caso quiz**: envía un intento de un quiz (solo multiple-choice/true-false). No
+      debe aparecer ningún panel de progreso; la corrección es instantánea y determinista.
 11. **Fuga del volcado de página al agotarse el presupuesto de pasos** (requiere API key).
     Es el bug que destapó esta QA: el harness guardaba el último tool result y, sin pasos,
     lo devolvía como si fuera la respuesta del tutor.
@@ -216,6 +244,36 @@ la nota se queda en la determinista. La ruta de degradación es real, no sólo d
     - Si aun así falla la validación, el mensaje de error del CLI enumera los campos
       requeridos por tipo de pregunta (`artifact-commands.ts`); ese texto va dirigido al
       modelo, y es la pista de qué se le olvidó documentar.
+
+## QA manual PR-15 — reintentos ante 503
+
+El 503 no se puede pedir a voluntad a Google, así que se provoca localmente.
+
+1. **Sin cambios (baseline).** Con `pnpm run dev` y API key válida: usa el chat y corrige
+   un test con respuestas cortas. En el log del server **no** debe aparecer ninguna línea
+   `gemini.retry`. Nada ha cambiado.
+
+2. **API key inválida (4xx no se reintenta).** Cambia `GOOGLE_GENERATIVE_AI_API_KEY` por
+   basura y reinicia. Manda un mensaje al tutor → el error aparece **inmediatamente**, sin
+   esperar varios segundos, y **no** hay líneas `gemini.retry` en el log. Prueba que los
+   4xx no se reintentan. Devuelve la key correcta y reinicia antes del paso siguiente.
+
+3. **503 simulado (transitorio).** Levanta un servidor local de un fichero que devuelva
+   `503` las dos primeras peticiones y luego haga de proxy (o que devuelva `503` siempre
+   para ver las tres líneas). Apunta `geminiUrl`/`geminiStreamUrl` en `gemini.ts` a ese
+   servidor. Manda un mensaje al tutor → en el log deben aparecer **hasta tres** líneas
+   `gemini.retry` con `status: 503`, esperas crecientes. Si el proxy termina cediendo,
+   el turno acaba con respuesta normal. **Revierte el cambio antes de commitear**;
+   `git status` debe quedar limpio.
+
+4. **Corte a mitad de stream.** Con el mismo servidor local, envía algunos eventos SSE y
+   luego corta la conexión. En la UI: el texto del profe se queda a medias, **no vuelve
+   a empezar desde el principio** y el panel termina igualmente con la nota determinista.
+   En el log, el campo `method` debe decir `streamText` para los profes y `generateText`
+   para el chat y el Juez.
+
+Si no hay API key ni servidor local disponibles, indicar explícitamente en el cuerpo del
+PR qué pasos se omitieron.
 
 ## Qué reportar en una entrega
 

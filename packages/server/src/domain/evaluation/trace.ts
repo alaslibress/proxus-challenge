@@ -1,10 +1,13 @@
 import { Context, Effect } from "effect";
-import type { FinalFeedbackSchema, PdfCitation } from "@proxus/shared";
+import type { FinalFeedbackSchema, PanelAgentOutcome, PdfCitation, UngroundedReason } from "@proxus/shared";
 import type { PageText } from "../materials/material.ts";
+import type { EvaluationMode } from "./prompts.ts";
 
 export interface EvaluationTraceEntry {
   readonly attemptId: string;
   readonly artifactId: string;
+  readonly mode: EvaluationMode;
+  readonly ungroundedWhy?: UngroundedReason;
   readonly questionId: string;
   readonly questionPrompt: string;
   readonly expectedAnswer: string;
@@ -12,10 +15,8 @@ export interface EvaluationTraceEntry {
   readonly materialId: string | undefined;
   readonly pages: readonly number[];
   readonly evidence: readonly PageText[];
-  readonly goodTeacher: { readonly ok: true; readonly text: string }
-                      | { readonly ok: false; readonly reason: string };
-  readonly badTeacher:  { readonly ok: true; readonly text: string }
-                      | { readonly ok: false; readonly reason: string };
+  readonly goodTeacher: PanelAgentOutcome;
+  readonly badTeacher: PanelAgentOutcome;
   readonly judge: FinalFeedbackSchema | { readonly failed: string };
   readonly citations: readonly PdfCitation[];
   readonly deterministicScore: number;

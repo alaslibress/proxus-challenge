@@ -208,6 +208,14 @@ con la esperada.
 el texto extraído está vacío (PDF escaneado), o si el motor falla por cualquier motivo,
 se conserva la corrección determinista intacta y no se llama al LLM.
 
+**Estado del razonamiento (`PanelStatus`).** Desde PR-16 cada `ShortAnswerCorrection`
+lleva `panel?: PanelStatus` con el motivo exacto de por qué el panel se ancló al PDF o
+no: `{ ran: true, grounded: true }`, `{ ran: true, grounded: false, why }` con `why` ∈
+`"no-source" | "no-pages" | "extract-failed" | "empty-pages"`, o
+`{ ran: false, why: "judge-unavailable" }`. El campo `source` del artifact es **obligatorio**
+para que el panel corra en modo `grounded`; un artifact sin `source` obtiene siempre
+`why: "no-source"` y el panel corre en modo `ungrounded`.
+
 Multiple-choice y true-false **no pasan por el panel**: siguen siendo 100% deterministas
 y sin latencia añadida.
 

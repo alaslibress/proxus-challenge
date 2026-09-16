@@ -137,4 +137,19 @@ describe("readNdjson", () => {
 
     expect(frames).toEqual([]);
   });
+
+  it("delivers a reasoning frame interleaved between status and done", async () => {
+    const response = responseFrom([
+      '{"type":"status","value":"evaluating_good","questionId":"q1","questionIndex":0,"questionTotal":1}\n',
+      '{"type":"reasoning","agent":"good_teacher","channel":"text","delta":"hello","questionId":"q1","questionIndex":0,"questionTotal":1}\n',
+      '{"type":"done","payload":{}}\n'
+    ]);
+
+    const frames = await collect(readNdjson(response, decodeJson));
+
+    expect(frames).toHaveLength(3);
+    expect(frames[0]).toMatchObject({ type: "status" });
+    expect(frames[1]).toMatchObject({ type: "reasoning", agent: "good_teacher", delta: "hello" });
+    expect(frames[2]).toMatchObject({ type: "done" });
+  });
 });

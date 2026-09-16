@@ -72,12 +72,13 @@ const makeFakeEngine = (
     evaluate: (input, emit) =>
       Effect.gen(function* () {
         if (emit !== undefined) {
-          yield* emit("evaluating_good");
-          yield* emit("evaluating_bad");
-          yield* emit("deliberating");
+          yield* emit({ _tag: "stage", stage: "evaluating_good" });
+          yield* emit({ _tag: "stage", stage: "evaluating_bad" });
+          yield* emit({ _tag: "stage", stage: "deliberating" });
         }
 
         const traceBase = {
+          mode: input.mode,
           questionId: input.questionId,
           questionPrompt: input.questionPrompt,
           expectedAnswer: input.expectedAnswer,
@@ -85,8 +86,8 @@ const makeFakeEngine = (
           materialId: input.materialId,
           pages: input.pages,
           evidence: input.evidence,
-          goodTeacher: { ok: true as const, text: "bien" },
-          badTeacher: { ok: true as const, text: "mal" },
+          goodTeacher: { status: "ok" as const, text: "bien" },
+          badTeacher: { status: "ok" as const, text: "mal" },
           durationMs: 1
         };
 
@@ -116,7 +117,8 @@ const makeFakeEngine = (
           feedback: {
             is_correct: behavior.is_correct,
             feedback: "Feedback consolidado del panel.",
-            citas_pdf
+            citas_pdf,
+            grounded: input.mode === "grounded"
           },
           trace: {
             ...traceBase,
@@ -324,5 +326,92 @@ describe("reviewGradedAttemptStreaming", () => {
     expect(payload.corrections[0]).toEqual(multipleChoiceCorrection);
     // El intento de entrada no se ha mutado.
     expect(gradedAttempt.corrections[1]).toEqual(shortAnswerCorrection("q1"));
+  });
+
+  it("emits reasoning frames between status frames and before done, with questionId", async () => {
+    const engineWithReasoning = Layer.succeed(EvaluationEngineService)({
+      evaluate: (input, emit) =>
+        Effect.gen(function* () {
+          if (emit !== undefined) {
+            yield* emit({ _tag: "stage", stage: "evaluating_good" });
+            yield* emit({ _tag: "reasoning", agent: "good_teacher", channel: "text", delta: "good delta" });
+            yield* emit({ _tag: "stage", stage: "evaluating_bad" });
+            yield* emit({ _tag: "reasoning", agent: "bad_teacher", channel: "text", delta: "bad delta" });
+            yield* emit({ _tag: "stage", stage: "deliberating" });
+          }
+          return {
+            feedback: { is_correct: true, feedback: "ok", citas_pdf: [], grounded: false },
+            trace: {
+              mode: "ungrounded" as const,
+              questionId: input.questionId,
+              questionPrompt: input.questionPrompt,
+              expectedAnswer: input.expectedAnswer,
+              studentAnswer: input.studentAnswer,
+              materialId: undefined,
+              pages: [],
+              evidence: [],
+              goodTeacher: { status: "ok" as const, text: "good" },
+              badTeacher: { status: "ok" as const, text: "bad" },
+              judge: { is_correct: true, feedback: "ok", citas_pdf: [] },
+              citations: [],
+              durationMs: 1
+            }
+          };
+        }) as unknown as ReturnType<EvaluationEngineService["evaluate"]>
+    });
+
+    const singleQ: GradedTestAttempt = {
+      ...gradedAttempt,
+      corrections: [shortAnswerCorrection("q1")],
+      answers: [{ questionType: "short-answer", questionId: "q1", answer: "respuesta" }]
+    };
+
+    const events = await collect(
+      testArtifact,
+      singleQ,
+      Layer.mergeAll(fakeTrace, engineWithReasoning, makeFakeMaterialRepository({}), noLanguageModelNeeded)
+    );
+
+    const reasoningEvents = events.filter((e) => e.type === "reasoning");
+    const doneIndex = events.findIndex((e) => e.type === "done");
+    const lastReasoningIndex = events.map((e) => e.type).lastIndexOf("reasoning");
+
+    expect(reasoningEvents.length).toBeGreaterThan(0);
+    // reasoning events appear before done
+    expect(lastReasoningIndex).toBeLessThan(doneIndex);
+    // every reasoning event carries the questionId
+    for (const event of reasoningEvents) {
+      expect((event as Extract<AttemptStreamEvent, { type: "reasoning" }>).questionId).toBe("q1");
+    }
+    // always ends with exactly one done
+    expect(events.at(-1)?.type).toBe("done");
+    expect(events.filter((e) => e.type === "done")).toHaveLength(1);
+  });
+
+  it("emits the three stages for a short-answer in an artifact WITHOUT source (ungrounded mode)", async () => {
+    const artifactWithoutSource: TestArtifact = { ...testArtifact, source: undefined };
+    const singleShortAnswer: GradedTestAttempt = {
+      ...gradedAttempt,
+      corrections: [shortAnswerCorrection("q1")],
+      answers: [{ questionType: "short-answer", questionId: "q1", answer: "Las plantas usan la luz para producir energía." }]
+    };
+
+    const events = await collect(
+      artifactWithoutSource,
+      singleShortAnswer,
+      Layer.mergeAll(
+        fakeTrace,
+        makeFakeEngine({ kind: "succeed", is_correct: true, quote: "no importa" }),
+        makeFakeMaterialRepository({}),
+        noLanguageModelNeeded
+      )
+    );
+
+    const stages = events
+      .filter((e) => e.type === "status")
+      .map((e) => (e as Extract<AttemptStreamEvent, { type: "status" }>).value);
+
+    expect(stages).toEqual(["evaluating_good", "evaluating_bad", "deliberating"]);
+    expect(events.at(-1)?.type).toBe("done");
   });
 });

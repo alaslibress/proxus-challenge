@@ -1,7 +1,8 @@
-import { useAtomRefresh } from "@effect/atom-react";
+import { useAtomRefresh, useAtomValue } from "@effect/atom-react";
 import type { AgentMessage } from "@proxus/shared";
 import { useEffect, useRef, useState } from "react";
 import { artifactsQuery } from "../artifacts/atoms.ts";
+import { openExerciseAtom } from "../artifacts/chat-context.ts";
 import { materialsQuery } from "../materials/atoms.ts";
 import { applyInvalidations, invalidationsForToolCall } from "./invalidation.ts";
 import { resolveStreamFailure, streamTutorMessage } from "./stream.ts";
@@ -30,6 +31,7 @@ export const useTutorChat = (): TutorChatState => {
   const [error, setError] = useState<string | undefined>();
   const [stopped, setStopped] = useState(false);
 
+  const openExercise = useAtomValue(openExerciseAtom);
   const refreshArtifacts = useAtomRefresh(artifactsQuery);
   const refreshMaterials = useAtomRefresh(materialsQuery);
 
@@ -56,7 +58,11 @@ export const useTutorChat = (): TutorChatState => {
 
     try {
       for await (const event of streamTutorMessage(
-        { input: prompt, messages: history },
+        {
+          input: prompt,
+          messages: history,
+          ...(openExercise === null ? {} : { openExercise })
+        },
         { signal: controller.signal }
       )) {
         if (event.type !== "message") {

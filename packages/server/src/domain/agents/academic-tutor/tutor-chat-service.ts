@@ -5,6 +5,7 @@ import { ArtifactRepository } from "../../artifacts/artifact.ts";
 import { MaterialRepository } from "../../materials/material.ts";
 import { AgentSession } from "../harness/index.ts";
 import { makeAcademicTutorHarness } from "../academic-tutor.ts";
+import { buildOpenExerciseContext } from "./artifact-context.ts";
 
 export interface TutorChatService {
   readonly sendMessage: (
@@ -32,12 +33,32 @@ export const TutorChatServiceLive = Layer.effect(
     const materialRepository = yield* MaterialRepository;
     const artifactRepository = yield* ArtifactRepository;
 
-    const makeSession = Effect.gen(function* () {
+    const makeSession = (input: TutorChatRequest) => Effect.gen(function* () {
       const materials = yield* materialRepository.list().pipe(
         Effect.orElseSucceed(() => [] as const)
       );
-      const materialsContext = buildMaterialsContext(materials);
-      const harness = makeAcademicTutorHarness(materialRepository, artifactRepository, materialsContext);
+
+      const ref = input.openExercise;
+      const artifact = ref === undefined
+        ? undefined
+        : yield* artifactRepository.getArtifact(ref.artifactId).pipe(
+            Effect.orElseSucceed(() => undefined)
+          );
+
+      const attempt = ref?.attemptId === undefined || artifact === undefined
+        ? undefined
+        : yield* artifactRepository.getAttempt(ref.attemptId).pipe(
+            Effect.orElseSucceed(() => undefined),
+            // Discard the attempt if it does not belong to the artifact.
+            Effect.map((a) => (a !== undefined && a.artifactId === artifact.id ? a : undefined))
+          );
+
+      const harness = makeAcademicTutorHarness(
+        materialRepository,
+        artifactRepository,
+        buildMaterialsContext(materials),
+        buildOpenExerciseContext(artifact, attempt)
+      );
       return { harness, session: AgentSession.make(harness) };
     });
 
@@ -51,13 +72,13 @@ export const TutorChatServiceLive = Layer.effect(
     });
 
     return {
-      sendMessage: (input) => Effect.flatMap(makeSession, ({ harness, session }) =>
+      sendMessage: (input) => Effect.flatMap(makeSession(input), ({ harness, session }) =>
         session.run(sessionInput(input)).pipe(
           Effect.provide(harness.layer)
         )
       ),
       streamMessage: (input) => Stream.unwrap(
-        Effect.map(makeSession, ({ harness, session }) =>
+        Effect.map(makeSession(input), ({ harness, session }) =>
           session.stream(sessionInput(input)).pipe(
             Stream.map((message): TutorChatStreamEvent => ({ type: "message", message })),
             Stream.concat(Stream.succeed({ type: "done" as const })),
