@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { Schema } from "effect";
-import { ShortAnswerCorrection } from "@proxus/shared";
+import { PanelAgentOutcome, ShortAnswerCorrection } from "@proxus/shared";
 
 describe("ShortAnswerCorrection schema retrocompatibility", () => {
   it("decodes a stored correction without panel/goodTeacher/badTeacher (legacy payload)", () => {
@@ -47,5 +47,17 @@ describe("ShortAnswerCorrection schema retrocompatibility", () => {
     expect(decoded.review?.grounded).toBe(true);
     expect((decoded.review as { goodTeacher?: unknown }).goodTeacher).toBeUndefined();
     expect((decoded.review as { badTeacher?: unknown }).badTeacher).toBeUndefined();
+  });
+
+  it("decodes a PanelAgentOutcome without `thought` in both variants (attempts stored before PR-17)", () => {
+    const legacyOk = { status: "ok", text: "Buen enfoque." };
+    const legacyFailed = { status: "failed", reason: "Timeout after 30s" };
+
+    expect(() => Schema.decodeUnknownSync(PanelAgentOutcome)(legacyOk)).not.toThrow();
+    expect(() => Schema.decodeUnknownSync(PanelAgentOutcome)(legacyFailed)).not.toThrow();
+
+    // Ausente, no vacío: la clave ni siquiera existe tras decodificar.
+    expect("thought" in Schema.decodeUnknownSync(PanelAgentOutcome)(legacyOk)).toBe(false);
+    expect("thought" in Schema.decodeUnknownSync(PanelAgentOutcome)(legacyFailed)).toBe(false);
   });
 });

@@ -11,6 +11,12 @@ export const emptyTranscript: PanelTranscript = {
   bad_teacher: { thought: "", text: "" }
 };
 
+/** Transcript en vivo indexado por questionId. Nunca se vacía durante un run:
+ * cambiar de pregunta añade una clave, no borra las anteriores. */
+export type PanelTranscripts = Readonly<Record<string, PanelTranscript>>;
+
+export const emptyTranscripts: PanelTranscripts = {};
+
 export type EvaluationRunState =
   | { readonly phase: "idle" }
   | {
@@ -19,7 +25,7 @@ export type EvaluationRunState =
       readonly questionId: string;
       readonly questionIndex: number;
       readonly questionTotal: number;
-      readonly transcript: PanelTranscript;
+      readonly transcripts: PanelTranscripts;
     }
   | { readonly phase: "done"; readonly attempt: ArtifactAttempt }
   | { readonly phase: "error"; readonly message: string };

@@ -13,7 +13,8 @@ import { Markdown } from "./Markdown.tsx";
 import * as AsyncResult from "effect/unstable/reactivity/AsyncResult";
 import { artifactQuery, artifactsQuery, submitArtifactAttemptAction } from "../domain/artifacts/atoms.ts";
 import { streamAttemptSubmission } from "../domain/artifacts/attempt-stream.ts";
-import { emptyTranscript, evaluationRunAtom } from "../domain/artifacts/evaluation-atoms.ts";
+import { emptyTranscripts, evaluationRunAtom } from "../domain/artifacts/evaluation-atoms.ts";
+import { appendDelta } from "../domain/artifacts/transcripts.ts";
 import { openExerciseAtom } from "../domain/artifacts/chat-context.ts";
 import { ARTIFACT_KIND_LABEL, QUESTION_TYPE_LABEL } from "../domain/artifacts/labels.ts";
 import { EvaluationProgress } from "./evaluation/EvaluationProgress.tsx";
@@ -209,7 +210,7 @@ function ExerciseSolver({ artifact }: { readonly artifact: Extract<Artifact, { r
     const payload = buildSubmitInput(artifact, answers);
     const controller = new AbortController();
     abortRef.current = controller;
-    setRun({ phase: "running", activeStages: [], questionId: "", questionIndex: 0, questionTotal: 0, transcript: emptyTranscript });
+    setRun({ phase: "running", activeStages: [], questionId: "", questionIndex: 0, questionTotal: 0, transcripts: emptyTranscripts });
 
     try {
       let sawDone = false;
@@ -229,23 +230,13 @@ function ExerciseSolver({ artifact }: { readonly artifact: Extract<Artifact, { r
               questionId: event.questionId,
               questionIndex: event.questionIndex,
               questionTotal: event.questionTotal,
-              transcript: isNewQuestion ? emptyTranscript : current.transcript
+              transcripts: current.transcripts
             };
           });
         } else if (event.type === "reasoning") {
           setRun((current) => {
-            if (current.phase !== "running" || event.questionId !== current.questionId) return current;
-            const agentTranscript = current.transcript[event.agent];
-            return {
-              ...current,
-              transcript: {
-                ...current.transcript,
-                [event.agent]: {
-                  ...agentTranscript,
-                  [event.channel]: agentTranscript[event.channel] + event.delta
-                }
-              }
-            };
+            if (current.phase !== "running") return current;
+            return { ...current, transcripts: appendDelta(current.transcripts, event) };
           });
         } else if (event.type === "done") {
           sawDone = true;

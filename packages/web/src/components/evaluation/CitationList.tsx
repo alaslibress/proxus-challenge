@@ -19,20 +19,15 @@ function PanelIndicator({ correction }: { readonly correction: ShortAnswerCorrec
 export function ShortAnswerDetails({ correction }: { readonly correction: ShortAnswerCorrection }) {
   const [debateOpen, setDebateOpen] = useState(false);
 
-  const hasTeacherText =
-    correction.review?.goodTeacher?.status === "ok" ||
-    correction.review?.badTeacher?.status === "ok";
+  // El botón abre el debate, no el texto de los profes: si el panel corrió,
+  // siempre hay algo que leer (veredicto del Juez, o el motivo de cada fallo).
+  const hasPanelDebate = correction.review !== undefined;
 
   if (correction.review === undefined) {
     return (
       <div>
         <PanelIndicator correction={correction} />
         <p className="text-ink-soft">{correction.feedback}</p>
-        <PanelDebateModal
-          correction={correction}
-          open={debateOpen}
-          onClose={() => setDebateOpen(false)}
-        />
       </div>
     );
   }
@@ -60,7 +55,7 @@ export function ShortAnswerDetails({ correction }: { readonly correction: ShortA
       {review.citas_pdf.length > 0 && (
         <CitationList citations={review.citas_pdf} />
       )}
-      {hasTeacherText && (
+      {hasPanelDebate && (
         <button
           onClick={() => setDebateOpen(true)}
           style={{

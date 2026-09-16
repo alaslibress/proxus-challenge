@@ -51,6 +51,37 @@ describe("formatTraceEntry — cabecera y datos de la pregunta", () => {
   });
 });
 
+describe("formatTraceEntry — razonamiento del profe (PR-17)", () => {
+  it("prints the thought under a Reasoning label, below the verdict", () => {
+    const output = formatTraceEntry(
+      entry({ goodTeacher: { status: "ok", text: "Buen enfoque.", thought: "Primero leo la evidencia.\nLuego decido." } }),
+      TIMESTAMP
+    );
+
+    expect(output).toContain("### Good Teacher\nBuen enfoque.\n\n**Reasoning:**\n\n> Primero leo la evidencia.\n> Luego decido.");
+  });
+
+  it("prints the partial thought of a fallen teacher, after its reason", () => {
+    const output = formatTraceEntry(
+      entry({ goodTeacher: { status: "failed", reason: "Timeout after 30s", thought: "Iba por aquí" } }),
+      TIMESTAMP
+    );
+
+    expect(output).toContain("### Good Teacher\n_No disponible: Timeout after 30s_\n\n**Reasoning:**\n\n> Iba por aquí");
+  });
+
+  it("without a thought the output is byte for byte the one before this PR", () => {
+    const withoutThought = formatTraceEntry(baseEntry, TIMESTAMP);
+
+    expect(withoutThought).not.toContain("Reasoning");
+    // Entre el veredicto de un profe y la sección siguiente no se cuela nada.
+    expect(withoutThought).toContain("### Good Teacher\nBuen enfoque.\n\n### Bad Teacher\nFalta precisión.\n\n### Juez");
+    // Y un `thought` vacío se trata como ausente, no como bloque vacío.
+    expect(formatTraceEntry(entry({ goodTeacher: { status: "ok", text: "Buen enfoque.", thought: "   " } }), TIMESTAMP))
+      .toBe(withoutThought);
+  });
+});
+
 describe("formatTraceEntry — profes y juez caídos", () => {
   it("renders a fallen teacher as _No disponible: <razón>_", () => {
     const output = formatTraceEntry(

@@ -14,8 +14,20 @@ export type FinalFeedbackSchema = typeof FinalFeedbackSchema.Type;
  * pero ahora vive en shared para que traza y API no puedan divergir.
  */
 export const PanelAgentOutcome = Schema.Union([
-  Schema.Struct({ status: Schema.Literal("ok"), text: Schema.String }),
-  Schema.Struct({ status: Schema.Literal("failed"), reason: Schema.String })
+  Schema.Struct({
+    status: Schema.Literal("ok"),
+    text: Schema.String,
+    // Opcional y sin default: los intentos del PR-16 no lo llevan, y un modelo
+    // sin thinking tampoco. Ausente ≠ cadena vacía.
+    thought: Schema.optional(Schema.String)
+  }),
+  Schema.Struct({
+    status: Schema.Literal("failed"),
+    reason: Schema.String,
+    // Un profe que se cae a los 30 s casi siempre dejó pensamiento a medias.
+    // Es el caso en el que leerlo más ayuda.
+    thought: Schema.optional(Schema.String)
+  })
 ]);
 export type PanelAgentOutcome = typeof PanelAgentOutcome.Type;
 

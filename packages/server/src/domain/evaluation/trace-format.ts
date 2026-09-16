@@ -27,10 +27,18 @@ const formatEvidence = (entry: EvaluationTraceEntry): string => {
   return `**Evidencia inyectada:** ${materialLabel}\n\n${body}`;
 };
 
+/** El pensamiento va **debajo** del veredicto y solo si existe con contenido: sin él la
+ * salida debe ser byte a byte la de siempre. Blockquote, como la evidencia: es prosa
+ * cruda del modelo, no texto del proyecto. */
+const formatThought = (teacher: EvaluationTraceEntry["goodTeacher"]): string =>
+  teacher.thought !== undefined && teacher.thought.trim().length > 0
+    ? `\n\n**Reasoning:**\n\n${blockquote(teacher.thought)}`
+    : "";
+
 const formatTeacher = (title: string, teacher: EvaluationTraceEntry["goodTeacher"]): string =>
   teacher.status === "ok"
-    ? `### ${title}\n${teacher.text}`
-    : `### ${title}\n_No disponible: ${teacher.reason}_`;
+    ? `### ${title}\n${teacher.text}${formatThought(teacher)}`
+    : `### ${title}\n_No disponible: ${teacher.reason}_${formatThought(teacher)}`;
 
 const formatJudge = (judge: EvaluationTraceEntry["judge"]): string => {
   if ("failed" in judge) {

@@ -81,9 +81,9 @@ pnpm --filter @proxus/web run build
 **No hay cifra de tests que memorizar. La regla es: anota el recuento de `pnpm -r test`
 antes de empezar y no lo dejes bajar.** Un plan puede añadir tests; ninguno puede restarlos
 sin decirlo. Si al terminar hay menos tests que al empezar, has roto algo o has borrado
-cobertura: para y repórtalo. (Referencia del 08-sep-2026, para que veas el orden de
-magnitud: 15 ficheros / 137 tests — 12/117 en `server`, 3/20 en `web`. La cifra caduca; la
-regla no.)
+cobertura: para y repórtalo. (Referencia del 16-sep-2026, tras el PR-17, para que veas el
+orden de magnitud: 26 ficheros / 235 tests — 19/189 en `server`, 7/46 en `web`. La cifra
+caduca; la regla no.)
 
 Todos los tests son deterministas y corren **sin API key ni red**.
 
@@ -94,11 +94,12 @@ escrito para dejar el repo compilando.
 
 ## 3. El roadmap, que ya está cerrado
 
-**Los 18 planes de `planes/` están implementados o en curso.** Los primeros 16 están mergeados en
-`main`; el PR-14 (`fix/solucion-errores`) y el PR-15 (`fix/gemini-reintentos`) están en curso. Los 15 primeros (PR-01…PR-13)
-están mergeados en `main`; el PR-08 aterrizó en `e2e8319`, en la rama `feat/evals-entrega`,
-y entró en `main` con el merge del PR #7 (`351aaac`). No quedan pendientes salvo
-PR-14 y PR-15, así que esta tabla ya no es una cola de trabajo: es el **registro del orden real en
+**Los 19 planes de `planes/` están implementados o en curso.** Los 15 primeros
+(PR-01…PR-13) están mergeados en `main`; el PR-08 aterrizó en `e2e8319`, en la rama
+`feat/evals-entrega`, y entró en `main` con el merge del PR #7 (`351aaac`). El PR-14
+(`fix/solucion-errores`), el PR-15 (`fix/gemini-reintentos`), el PR-16
+(`feat/panel-transparente`) y el PR-17 (`feat/razonamiento-persistente`) son las mejoras
+post-entrega. Esta tabla ya no es una cola de trabajo: es el **registro del orden real en
 que se hicieron**, y sirve para dos cosas.
 
 1. **Arqueología.** Cuando el código te sorprenda, el plan del PR que lo introdujo explica
@@ -132,6 +133,7 @@ encadenan sobre la firma de `evaluate`.
 | [14](./pr-14-solucion-errores/plan.md) | `fix/solucion-errores` | Cuatro bugs de QA: panel siempre corre, tutor sabe el ejercicio abierto, agrupación radio, razonamiento en vivo. |
 | [15](./pr-15-gemini-reintentos/plan.md) | `fix/gemini-reintentos` | Reintentos con backoff exponencial y jitter ante 408/429/5xx. Errores dicen qué llamada falló. |
 | [16](./pr-16-panel-transparente/plan.md) | `feat/panel-transparente` | Cuatro bugs de QA post-PR-14: source omitido en ejemplos, sin indicador de si corrió el panel, razonamiento perdido en streaming, prompts en inglés. Ref. tests: 25 ficheros / 222 tests. |
+| [17](./pr-17-razonamiento-persistente/plan.md) | `feat/razonamiento-persistente` | El pensamiento de los profes se acumula en el motor (también el parcial de uno caído), viaja en el intento persistido y se relee en el modal; en vivo el transcript ya no se desmonta ni se pierde al cambiar de pregunta. Ref. tests: 26 ficheros / 235 tests (server 19/189, web 7/46). |
 
 El plan de recorte que esta sección traía —tirar el PR-06, luego el resaltado de citas del
 PR-07, luego casos del panel del PR-08— **no llegó a usarse**: entraron los tres enteros.

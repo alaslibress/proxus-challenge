@@ -109,6 +109,7 @@ En orden real de ejecución, no numérico.
 - **PR-14** — Cuatro bugs de QA: el panel de 3 agentes siempre corre, el tutor conoce el ejercicio abierto, la agrupación de radio quedó rota, y el razonamiento de los profes se muestra en vivo.
 - **PR-15** — Reintentos con backoff exponencial y jitter en Gemini ante errores 408/429/5xx. Los mensajes de error dicen qué llamada falló.
 - **PR-16** — Cuatro bugs detectados en testing post-PR-14: `source` se omitía en los ejemplos del prompt (toda corrección salía "Graded without PDF evidence"), sin indicador de si el panel corrió o no, el razonamiento de los profes se perdía tras el streaming, y los prompts estaban harcodeados en inglés.
+- **PR-17** — El razonamiento de los profes deja de evaporarse: el motor lo acumula (incluso el parcial de un profe caído), viaja en el intento persistido y se relee desde el modal; en vivo el transcript ya no se desmonta al terminar la etapa y guarda el historial por pregunta.
 
 ### Por qué hay un PR-1.5
 
@@ -256,7 +257,7 @@ Todos sobre este árbol, con sus resultados reales:
 
 ```bash
 pnpm run typecheck        # los cuatro paquetes, sin errores
-pnpm run test             # 17 ficheros, 151 tests (server 14/131, web 3/20)
+pnpm run test             # 26 ficheros, 235 tests (server 19/189, web 7/46)
 pnpm --filter @proxus/web run build   # ~0,6 s (aviso de chunk >500 kB, preexistente)
 ```
 
@@ -278,25 +279,27 @@ el sistema con ello. Cubren, entre otras cosas:
   (`artifact-schema.test.ts`, 5 casos).
 
 Además, la suite se ha comprobado **rompiéndola a propósito**: relajando
-`panelRaisesScore` (`review.ts:72-76`) para que la nota suba con `is_correct` a secas
-—es decir, quitando la exigencia de cita `verified`— se ponen en rojo **exactamente 5
-tests**, todos en `review.test.ts`. Cifra comprobada ejecutando `npm test` con la mutación
-puesta (5 failed | 126 passed) y revirtiéndola después (151/151 en verde):
+`panelRaisesScore` (`domain/evaluation/review.ts`) para que la nota suba con `is_correct` a
+secas —es decir, quitando la exigencia de cita `verified` en modo `grounded`— se ponen en
+rojo **cinco tests**, todos en `review.test.ts`. La medición se hizo con la suite del PR-08
+(cinco en rojo sobre los 131 del servidor de entonces) y no se ha vuelto a ejecutar desde
+entonces; los nombres de abajo sí están puestos al día con los del fichero:
 
 - `reviewGradedAttempt › does NOT raise the grade when the citation is
   invented/unverifiable against the real text`
 - `reviewGradedAttempt › does NOT raise the grade when the panel says is_correct but the
   citation is unverified`
 - `reviewGradedAttempt › does NOT raise the grade when the panel says is_correct but cites
-  nothing at all (citas_pdf: [])`
-- `panelRaisesScore › does NOT raise the score when the judge says correct but no citation
-  is verified`
-- `panelRaisesScore › does NOT raise the score when the judge says correct but cites
-  nothing`
+  nothing at all (citas_pdf: [], grounded mode)`
+- `panelRaisesScore › does NOT raise the score (grounded) when the judge says correct but
+  no citation is verified`
+- `panelRaisesScore › does NOT raise the score (grounded) when the judge says correct but
+  cites nothing`
 
-Los otros tres casos de `describe("panelRaisesScore")` siguen verdes, y así debe ser:
-cubren la dirección contraria de la regla (correcta + cita verificada **sí** sube;
-incorrecta con cita verificada no sube; sin panel no sube), que la mutación no toca.
+Los demás casos de `describe("panelRaisesScore")` siguen verdes, y así debe ser: cubren la
+dirección contraria de la regla (correcta + cita verificada **sí** sube; incorrecta con
+cita verificada no sube; sin panel no sube) y el modo `ungrounded`, donde basta con que el
+Juez diga que es correcta y por tanto la mutación no cambia nada.
 Una suite que no puede ponerse roja no vale nada.
 
 ### Checks contra Gemini de verdad
@@ -544,8 +547,8 @@ Las decisiones incómodas, dichas en voz alta.
   `Schema.fromJsonString`. Lo único que faltaba era que el adaptador honrase
   `responseFormat` (`gemini.ts:242-247`): ~15 líneas en vez de una capa nueva.
 - **Se usa vitest pese a que `CHALLENGE.md` desaconseja frameworks nuevos.** El criterio de
-  *"capacidad de evaluación"* se responde mucho mejor con 151 tests deterministas que
-  corren sin API key que con un script Effect a mano, que ya no escalaba más allá de un
+  *"capacidad de evaluación"* se responde mucho mejor con cientos de tests deterministas
+  que corren sin API key que con un script Effect a mano, que ya no escalaba más allá de un
   dataset. El coste es una devDependency por paquete y ninguna línea de producción.
 
 ## Dónde mirar para auditar
@@ -671,12 +674,13 @@ documentacion/            # Documentación de esta entrega
   adr-02-evaluacion-transporte-observabilidad.md   # ADR-02: transporte y trazabilidad
   design-system.md              # Tokens de color y tipografía; norma para toda UI
 
-planes/                   # Un plan por PR, 16 en total: PR-01 → PR-08 son el roadmap de
+planes/                   # Un plan por PR, 19 en total: PR-01 → PR-08 son el roadmap de
                           # esta entrega; PR-09 → PR-13 son producto y bugs añadidos
                           # después e intercalados al principio (PR-12.1 y PR-12.2 son
                           # las dos iteraciones que hicieron falta para cerrar el PR-12);
-                          # y PR-1.5 es el sistema visual, hallazgo de la primera fase
-                          # resuelto justo detrás del PR-01. Ver §0.
+                          # PR-14 → PR-17 son mejoras post-entrega; y PR-1.5 es el sistema
+                          # visual, hallazgo de la primera fase resuelto justo detrás del
+                          # PR-01. Ver §0.
   plan.md                       # Plan general: tabla de PRs, estado y dependencias
   GUIA-DOER.md                  # Entorno, orden de los PRs y trampas del repo
 ```

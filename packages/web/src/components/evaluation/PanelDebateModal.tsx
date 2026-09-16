@@ -26,6 +26,21 @@ function TeacherSection({
       >
         {title}
       </h3>
+      {outcome !== undefined && outcome.thought !== undefined && (
+        <details style={{ marginBottom: "0.5rem" }}>
+          <summary style={{ cursor: "pointer", fontSize: 12, color: "var(--color-ink-mute)" }}>
+            Reasoning
+          </summary>
+          <div
+            className="border border-line bg-surface-muted"
+            style={{ borderRadius: 8, padding: "8px 12px", marginTop: 6,
+                     whiteSpace: "pre-wrap", fontSize: 12.5, maxHeight: 260, overflowY: "auto",
+                     color: "var(--color-ink-faint)", fontStyle: "italic" }}
+          >
+            {outcome.thought}
+          </div>
+        </details>
+      )}
       {outcome === undefined ? (
         <p style={{ color: "var(--color-ink-mute)", fontStyle: "italic", fontSize: 13 }}>
           Not recorded for this attempt.

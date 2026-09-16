@@ -1,6 +1,7 @@
 import { useEffect, useRef } from "react";
 import type { AttemptEvaluationStage } from "@proxus/shared";
 import type { EvaluationRunState, PanelTranscript } from "../../domain/artifacts/evaluation-atoms.ts";
+import { transcriptFor } from "../../domain/artifacts/transcripts.ts";
 
 const STAGE_LABEL: Record<AttemptEvaluationStage, string> = {
   evaluating_good: "Good Teacher analysing…",
@@ -24,10 +25,18 @@ function TranscriptPanel({
 }) {
   const { thought, text } = transcript[agent];
   const containerRef = useRef<HTMLDivElement>(null);
+  // El usuario que sube a leer manda: dejamos de forzar el fondo hasta que vuelve a él.
+  const stickToBottomRef = useRef<boolean>(true);
+
+  const onScroll = () => {
+    const el = containerRef.current;
+    if (el === null) return;
+    stickToBottomRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < 24;
+  };
 
   useEffect(() => {
     const el = containerRef.current;
-    if (el !== null) el.scrollTop = el.scrollHeight;
+    if (el !== null && stickToBottomRef.current) el.scrollTop = el.scrollHeight;
   }, [thought, text]);
 
   if (thought.length === 0 && text.length === 0) return null;
@@ -35,6 +44,7 @@ function TranscriptPanel({
   return (
     <div
       ref={containerRef}
+      onScroll={onScroll}
       aria-live="off"
       aria-label={AGENT_LABEL[agent]}
       className="border border-line bg-surface-muted"
@@ -66,6 +76,10 @@ export function EvaluationProgress({
   readonly run: Extract<EvaluationRunState, { readonly phase: "running" }>;
   readonly onCancel: () => void;
 }) {
+  const currentTranscript = transcriptFor(run.transcripts, run.questionId);
+  const questionIds = Object.keys(run.transcripts);
+  const previousQuestionIds = questionIds.filter((id) => id !== run.questionId);
+
   return (
     <div>
       <div className="flex flex-wrap items-center justify-between gap-3">
@@ -105,13 +119,37 @@ export function EvaluationProgress({
                 </span>
                 {STAGE_LABEL[stage]}
               </div>
-              {isTeacher && active && (
-                <TranscriptPanel agent={agent} transcript={run.transcript} />
+              {isTeacher && (
+                <TranscriptPanel agent={agent} transcript={currentTranscript} />
               )}
             </li>
           );
         })}
       </ul>
+      {questionIds.length > 1 && (
+        <details className="mt-3">
+          <summary className="text-ink-mute" style={{ cursor: "pointer", fontSize: 12.5 }}>
+            Previous questions
+          </summary>
+          <div className="mt-2 grid gap-3">
+            {previousQuestionIds.map((questionId) => (
+              <div key={questionId} className="grid gap-1">
+                <h4 className="text-ink-mute" style={{ fontSize: 12, fontWeight: 600, margin: 0 }}>
+                  Question {questionIds.indexOf(questionId) + 1}
+                </h4>
+                <TranscriptPanel
+                  agent="good_teacher"
+                  transcript={transcriptFor(run.transcripts, questionId)}
+                />
+                <TranscriptPanel
+                  agent="bad_teacher"
+                  transcript={transcriptFor(run.transcripts, questionId)}
+                />
+              </div>
+            ))}
+          </div>
+        </details>
+      )}
     </div>
   );
 }

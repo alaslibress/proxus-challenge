@@ -48,14 +48,24 @@ export const EvaluationEngineService = Context.Service<EvaluationEngineService>(
   "@proxus/server/evaluation/EvaluationEngineService"
 );
 
+/** Acumulador de un profe. Vive **fuera** del `Effect` a propósito: con
+ * `Effect.all(..., { mode: "result" })` un profe que falla se lleva por delante todo lo
+ * acumulado dentro del `Effect`, y el pensamiento parcial de un profe caído es justo el
+ * que más falta hace. Cada profe muta solo su propio objeto, así que el paralelismo
+ * sigue siendo seguro. */
+interface TeacherAccumulator {
+  text: string;
+  thought: string;
+}
+
 const runTeacher = (
   agent: PanelAgent,
   systemPrompt: string,
   userPrompt: string,
+  acc: TeacherAccumulator,
   emit?: (event: EvaluationProgressEvent) => Effect.Effect<void>
 ) =>
   Effect.gen(function* () {
-    let text = "";
     yield* LanguageModel.streamText({
       prompt: [
         { role: "system" as const, content: systemPrompt },
@@ -65,21 +75,22 @@ const runTeacher = (
     }).pipe(
       Stream.runForEach((part) => {
         if (part.type === "text-delta") {
-          text += part.delta;
+          acc.text += part.delta;
           return emit?.({ _tag: "reasoning", agent, channel: "text", delta: part.delta })
             ?? Effect.void;
         }
         if (part.type === "reasoning-delta") {
+          acc.thought += part.delta;
           return emit?.({ _tag: "reasoning", agent, channel: "thought", delta: part.delta })
             ?? Effect.void;
         }
         return Effect.void;
       })
     );
-    if (text.trim().length === 0) {
+    if (acc.text.trim().length === 0) {
       return yield* new TeacherStreamEmpty({ message: "Teacher stream produced no text" });
     }
-    return { text };
+    return { text: acc.text };
   }).pipe(Effect.timeout(TEACHER_TIMEOUT_MS));
 
 type TeacherResult =
@@ -92,10 +103,14 @@ const describeFailure = (result: TeacherResult & { _tag: "Failure" }): string =>
   return s;
 };
 
-const teacherOutcome = (result: TeacherResult): PanelAgentOutcome =>
-  result._tag === "Success"
-    ? { status: "ok", text: result.success.text }
-    : { status: "failed", reason: describeFailure(result) };
+const teacherOutcome = (result: TeacherResult, acc: TeacherAccumulator): PanelAgentOutcome => {
+  // `exactOptionalPropertyTypes` está activo (GUIA-DOER §5): nunca asignes
+  // `thought: undefined`. O la clave existe con contenido, o no existe.
+  const thought = acc.thought.trim().length > 0 ? { thought: acc.thought } : {};
+  return result._tag === "Success"
+    ? { status: "ok", text: result.success.text, ...thought }
+    : { status: "failed", reason: describeFailure(result), ...thought };
+};
 
 const evaluate = (
   input: EvaluationInput,
@@ -109,18 +124,21 @@ const evaluate = (
       yield* emit({ _tag: "stage", stage: "evaluating_bad" });
     }
 
+    const goodAcc: TeacherAccumulator = { text: "", thought: "" };
+    const badAcc: TeacherAccumulator = { text: "", thought: "" };
+
     const [goodResult, badResult] = yield* Effect.all(
       [
-        runTeacher("good_teacher", goodTeacherSystemPrompt(input.mode), goodTeacherPrompt(input), emit),
-        runTeacher("bad_teacher", badTeacherSystemPrompt(input.mode), badTeacherPrompt(input), emit)
+        runTeacher("good_teacher", goodTeacherSystemPrompt(input.mode), goodTeacherPrompt(input), goodAcc, emit),
+        runTeacher("bad_teacher", badTeacherSystemPrompt(input.mode), badTeacherPrompt(input), badAcc, emit)
       ],
       { concurrency: "unbounded", mode: "result" }
     );
 
     const good = goodResult._tag === "Success" ? goodResult.success.text : null;
     const bad = badResult._tag === "Success" ? badResult.success.text : null;
-    const goodTeacher = teacherOutcome(goodResult);
-    const badTeacher = teacherOutcome(badResult);
+    const goodTeacher = teacherOutcome(goodResult, goodAcc);
+    const badTeacher = teacherOutcome(badResult, badAcc);
 
     if (emit !== undefined) {
       yield* emit({ _tag: "stage", stage: "deliberating" });

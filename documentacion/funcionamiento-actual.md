@@ -27,7 +27,7 @@ Effect v4 **beta**, `4.0.0-beta.83` pineado exacto en los cuatro paquetes, sin r
 `rewriteRelativeImportExtensions`. Esto último obliga a que **todo import relativo lleve
 la extensión `.ts`/`.tsx`**; se cumple al 100% en el código existente.
 
-**Test runner**: `vitest@5` en `packages/server` (16 ficheros, 157 tests) y `packages/web` (5 ficheros, 33 tests), todos deterministas sin llamada de red. El gate sigue siendo `pnpm run typecheck`; los tests son la segunda capa.
+**Test runner**: `vitest@5` en `packages/server` (19 ficheros, 189 tests) y `packages/web` (7 ficheros, 46 tests), todos deterministas sin llamada de red. El gate sigue siendo `pnpm run typecheck`; los tests son la segunda capa.
 
 ---
 
@@ -252,7 +252,33 @@ panel pudo o no anclarse al PDF:
 
 La UI muestra un `PanelIndicator` con la etiqueta de estado encima del feedback del Juez, y
 un botón "See the panel debate" que abre un modal `PanelDebateModal` con el texto de cada
-profe (o su motivo de fallo) y las citas del Juez.
+profe (o su motivo de fallo) y las citas del Juez. Desde PR-17 ese botón aparece **siempre
+que el panel corrió** (`correction.review !== undefined`, en `ShortAnswerDetails` de
+`components/evaluation/CitationList.tsx`), no solo cuando algún profe produjo texto: con
+los dos profes caídos el modal seguía existiendo y no había forma de abrirlo, que es
+justo cuando más falta hace leer qué pasó.
+
+**El razonamiento de los profes se persiste desde PR-17.** `PanelAgentOutcome`
+(`packages/shared/src/schemas/evaluation.ts`) lleva un campo `thought?: string` en sus dos
+variantes, `ok` y `failed`. Es opcional y sin valor por defecto —ausente ≠ cadena vacía—,
+así que los intentos grabados antes de PR-17, o un modelo que no devuelva thinking,
+decodifican igual. En el motor, `runTeacher` (`engine.ts`) acumula los deltas del canal
+`reasoning` en un `TeacherAccumulator` que vive **fuera** del `Effect.gen`: con
+`Effect.all({ mode: "result" })` todo lo acumulado dentro del Effect se pierde cuando un
+profe falla, y el pensamiento parcial de un profe caído por timeout es precisamente el que
+más interesa conservar. Cada profe muta solo su propio acumulador, así que el paralelismo
+sigue siendo seguro. `teacherOutcome` añade la clave con spread condicional
+(`exactOptionalPropertyTypes` está activo: nunca se asigna `thought: undefined`). El modal
+lo pinta en un `<details>` cerrado rotulado `Reasoning` por profe, en texto plano con
+`white-space: pre-wrap`: el thinking es prosa cruda del modelo y como Markdown parpadea y
+rompe fórmulas; el veredicto (`text`) sí sigue en Markdown con KaTeX.
+
+**El Juez no razona en vivo, y no es un olvido.** El adaptador
+(`domain/agents/gemini.ts`) solo pide `thinkingConfig: { includeThoughts: true }` cuando la
+llamada **no** va en modo JSON, y el Juez necesita `generateObject` para que
+`FinalFeedbackSchema` se valide. Las dos cosas son excluyentes en la capa Gemini, así que
+el Juez sigue siendo una caja negra: lo único que publica es su JSON final. Cambiarlo
+exigiría una segunda llamada solo para la explicación, con su coste en cuota.
 
 `reviewGradedAttempt` (`domain/evaluation/review.ts`) nunca falla: cualquier error del
 panel se traga y el attempt determinista queda intacto. Multiple-choice y true-false no
@@ -266,12 +292,15 @@ pasan por el panel: siguen siendo 100% deterministas y sin latencia añadida.
 
 **Desde PR-06, cada corrección de una short-answer deja traza en disco.** El motor
 (`engine.ts`) devuelve, junto al veredicto, un borrador de `EvaluationTraceEntry`
-(`domain/evaluation/trace.ts`) con el texto de cada profe o su motivo de fallo y el JSON
-crudo del Juez; `review.ts` lo completa con la nota determinista, la nota final y si el
+(`domain/evaluation/trace.ts`) con el texto de cada profe o su motivo de fallo, su
+pensamiento si lo hubo (PR-17) y el JSON crudo del Juez; `review.ts` lo completa con la nota determinista, la nota final y si el
 panel la modificó, y llama a `EvaluationTrace.record`. La implementación
 (`infra/evaluation/file-evaluation-trace.ts`) formatea la entrada en Markdown legible
 (`domain/evaluation/trace-format.ts`, función pura sin Effect) y la escribe en
-`.data/sessions/<attemptId>.md` — un fichero por intento, una sección por pregunta.
+`.data/sessions/<attemptId>.md`. Desde PR-17 ese formateador tiene un `formatThought` que
+añade un bloque `**Reasoning:**` en blockquote **debajo** del veredicto de cada profe, y
+solo si hay pensamiento: sin él la salida es byte a byte la de siempre, y los tests de
+`trace-format.test.ts` lo custodian — un fichero por intento, una sección por pregunta.
 `record` no tiene canal de error y escribe en un fiber desligado (`Effect.forkDetach`,
 el único fork que existe en Effect v4 para esto: `forkChild`/`forkScoped` atarían la
 escritura al scope de la petición HTTP), así que un directorio sin permisos o un fallo de
@@ -415,9 +444,32 @@ panel en curso se pinta con `EvaluationProgress`
 (`components/evaluation/EvaluationProgress.tsx`): tres filas fijas en inglés
 ("Good Teacher analysing…", "Bad Teacher challenging…", "Judge deliberating…"),
 `aria-live="polite"` en la lista de etapas, y un botón Cancel que aborta el stream
-y vuelve a `idle`. Mientras Good Teacher o Bad Teacher están activos se muestra un
-`TranscriptPanel` con scroll automático: el canal `thought` (en itálica y color tenue)
-y el canal `text` (en soft) se actualizan en vivo con los deltas del frame `reasoning`.
+y vuelve a `idle`. Cada profe tiene su `TranscriptPanel`: el canal `thought` (en itálica
+y color tenue) y el canal `text` (en soft) se actualizan en vivo con los deltas del frame
+`reasoning`.
+
+**Desde PR-17 el transcript deja de desvanecerse.** Antes se renderizaba solo con
+`isTeacher && active`, así que en cuanto llegaba el status `deliberating` —que
+**reemplaza** `activeStages`, no la amplía— los dos paneles se desmontaban de golpe, justo
+cuando había algo que leer. Hoy el `TranscriptPanel` se monta siempre para los dos profes;
+el guard de vacío lo hace él mismo, de modo que un profe que aún no ha empezado sigue sin
+pintar nada. El scroll automático respeta al lector: un `useRef` marca si el usuario ha
+subido a leer y, mientras esté arriba, el panel no vuelve a saltar al fondo.
+
+El estado en vivo está **indexado por pregunta**: `PanelTranscripts`
+(`domain/artifacts/evaluation-atoms.ts`) es un `Record<questionId, PanelTranscript>` y la
+variante `running` guarda `transcripts`, no un único `transcript`. La reducción de deltas
+salió del `.tsx` a dos funciones puras, `appendDelta` y `transcriptFor`
+(`domain/artifacts/transcripts.ts`), testeadas en `__tests__/transcripts.test.ts` — mismo
+patrón que `panel-status.ts` en PR-16, porque vitest de web corre en `environment: "node"`
+sobre `*.test.ts` y no renderiza componentes. Cambiar de pregunta **añade una clave** en
+lugar de borrar la anterior, así que `EvaluationProgress` puede pintar debajo de las etapas
+un `<details>` cerrado por defecto rotulado `Previous questions`, con el transcript de los
+dos profes de cada pregunta ya corregida.
+
+Tras el frame `done` el componente se desmonta y manda el intento persistido: el
+razonamiento se relee desde `PanelDebateModal`, no desde el atom (§5). Es deliberado —
+guardar también el transcript en vivo sería una segunda fuente de verdad del mismo dato.
 El feedback del Juez se pinta con `CitationList` (`components/evaluation/CitationList.tsx`),
 que distingue **tres estados**:
 - Citas verificadas: "Verified · … · p. N".
@@ -451,7 +503,7 @@ Hay **dos niveles**, y sólo el segundo cuesta dinero.
 `vitest ^5.0.0` es devDependency de `packages/server` y de `packages/web`, cada uno con su
 `vitest.config.ts` (`environment: "node"`, `include: ["src/**/*.test.ts"]`) y sus scripts
 `test` / `test:watch`. Desde la raíz: `pnpm run test` (alias de `pnpm -r test`). Hoy son
-**25 ficheros y 222 tests** (19 server + 6 web), todos deterministas y sin ninguna llamada de red.
+**26 ficheros y 235 tests** (19 server + 7 web), todos deterministas y sin ninguna llamada de red.
 
 El modelo falso vive aquí: `domain/evaluation/__tests__/engine.test.ts:16-51`
 (`makeFakeLanguageModel`, con `generateText`, `generateObject`, `streamText` y fallos

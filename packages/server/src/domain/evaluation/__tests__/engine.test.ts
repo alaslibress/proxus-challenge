@@ -8,11 +8,21 @@ class FakeModelError extends Data.TaggedError("FakeModelError")<{ readonly reaso
 // A fake LanguageModel avoids depending on real Gemini credentials: text/object
 // generation is entirely under the test's control here, mirroring the fake PdfService
 // pattern used in file-material-repository.test.ts.
-const teacherStream = (text: string): Stream.Stream<Response.StreamPartEncoded> =>
-  Stream.make(
-    { type: "text-start" as const, id: "text" } as Response.StreamPartEncoded,
-    { type: "text-delta" as const, id: "text", delta: text } as Response.StreamPartEncoded,
-    { type: "text-end" as const, id: "text" } as Response.StreamPartEncoded
+const reasoningStream = (thoughts: readonly string[]): Stream.Stream<Response.StreamPartEncoded> =>
+  Stream.fromArray(
+    thoughts.map(
+      (delta) => ({ type: "reasoning-delta" as const, id: "reasoning", delta }) as Response.StreamPartEncoded
+    )
+  );
+
+const teacherStream = (text: string, thoughts: readonly string[] = []): Stream.Stream<Response.StreamPartEncoded> =>
+  Stream.concat(
+    reasoningStream(thoughts),
+    Stream.make(
+      { type: "text-start" as const, id: "text" } as Response.StreamPartEncoded,
+      { type: "text-delta" as const, id: "text", delta: text } as Response.StreamPartEncoded,
+      { type: "text-end" as const, id: "text" } as Response.StreamPartEncoded
+    )
   );
 
 const makeFakeLanguageModel = (options: {
@@ -20,6 +30,9 @@ const makeFakeLanguageModel = (options: {
   readonly badText?: string;
   readonly failGood?: boolean;
   readonly failBad?: boolean;
+  /** Deltas del canal `reasoning-delta` que emite cada profe antes de su texto. */
+  readonly goodThoughts?: readonly string[];
+  readonly badThoughts?: readonly string[];
   readonly judgeValue?: { readonly is_correct: boolean; readonly feedback: string; readonly citas_pdf: readonly string[] };
   readonly failJudge?: boolean;
   /** El Juez devolvió texto que no decodifica contra FinalFeedbackSchema (PR-08). */
@@ -53,14 +66,17 @@ const makeFakeLanguageModel = (options: {
       const systemPrompt = params.prompt[0]?.content ?? "";
       options.onStreamText?.(systemPrompt);
       const isGood = systemPrompt.includes("Good Teacher");
+      const thoughts = (isGood ? options.goodThoughts : options.badThoughts) ?? [];
       if (isGood && options.failGood === true) {
-        return Stream.fail(new FakeModelError({ reason: "good teacher failed" }));
+        // El fallo llega *después* del razonamiento ya emitido: así es como se cae un
+        // profe de verdad, a mitad de stream y con pensamiento a medias.
+        return Stream.concat(reasoningStream(thoughts), Stream.fail(new FakeModelError({ reason: "good teacher failed" })));
       }
       if (!isGood && options.failBad === true) {
-        return Stream.fail(new FakeModelError({ reason: "bad teacher failed" }));
+        return Stream.concat(reasoningStream(thoughts), Stream.fail(new FakeModelError({ reason: "bad teacher failed" })));
       }
       const text = isGood ? options.goodText ?? "buena respuesta" : options.badText ?? "mala respuesta";
-      return teacherStream(text);
+      return teacherStream(text, thoughts);
     }) as unknown as LanguageModel.Service["streamText"]
   });
 
@@ -280,5 +296,57 @@ describe("EvaluationEngineService.evaluate", () => {
     expect(result.feedback.goodTeacher?.status).toBe("ok");
     expect(result.feedback.badTeacher?.status).toBe("failed");
     expect(result.feedback.is_correct).toBe(true);
+  });
+
+  it("accumulates reasoning deltas in order into goodTeacher.thought", async () => {
+    const model = makeFakeLanguageModel({
+      goodText: "Well supported.",
+      goodThoughts: ["Primero ", "leo la evidencia", " y luego decido."],
+      judgeValue: { is_correct: true, feedback: "Correct.", citas_pdf: [] }
+    });
+
+    const result = await Effect.runPromise(runEvaluate(baseInput, model));
+
+    const goodT = result.feedback.goodTeacher;
+    expect(goodT?.status).toBe("ok");
+    expect(goodT?.thought).toBe("Primero leo la evidencia y luego decido.");
+  });
+
+  it("without any reasoning-delta the `thought` key does not exist at all (absent is not empty)", async () => {
+    const model = makeFakeLanguageModel({
+      goodText: "Well supported.",
+      badText: "Missing nuance.",
+      judgeValue: { is_correct: true, feedback: "Correct.", citas_pdf: [] }
+    });
+
+    const result = await Effect.runPromise(runEvaluate(baseInput, model));
+
+    const goodT = result.feedback.goodTeacher;
+    const badT = result.feedback.badTeacher;
+    expect(goodT).toBeDefined();
+    expect(badT).toBeDefined();
+    // `in`, no `=== undefined`: con exactOptionalPropertyTypes la clave ausente y la
+    // clave presente valiendo undefined son cosas distintas, y aquí debe estar ausente.
+    expect("thought" in (goodT as object)).toBe(false);
+    expect("thought" in (badT as object)).toBe(false);
+  });
+
+  it("a teacher that fails mid-stream keeps the partial thought it had already emitted", async () => {
+    const model = makeFakeLanguageModel({
+      failGood: true,
+      goodThoughts: ["Iba por aquí", " cuando todo reventó"],
+      badText: "Missing nuance.",
+      judgeValue: { is_correct: false, feedback: "Falta precisión.", citas_pdf: [] }
+    });
+
+    const result = await Effect.runPromise(runEvaluate(baseInput, model));
+
+    const goodT = result.feedback.goodTeacher;
+    expect(goodT?.status).toBe("failed");
+    // El acumulador vive fuera del Effect justamente para esto: con mode:"result" el
+    // fallo se lleva por delante todo lo que quede dentro del Effect.
+    expect(goodT?.thought).toBe("Iba por aquí cuando todo reventó");
+    // La traza de disco hereda el mismo pensamiento parcial.
+    expect(result.trace.goodTeacher.thought).toBe("Iba por aquí cuando todo reventó");
   });
 });
